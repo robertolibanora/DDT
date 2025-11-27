@@ -312,11 +312,11 @@ Nel file `.env` puoi configurare:
 
 ## 📄 Licenza
 
-[Specificare la licenza del progetto]
+SartoSRL
 
 ## 👥 Contributi
 
-[Eventuali informazioni su come contribuire al progetto]
+Roberto Libanora
 
 ## 🔗 Link Utili
 
