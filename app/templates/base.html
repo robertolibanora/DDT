@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}DDT Processor{% endblock %} - Tema Mare</title>
-    <link rel="stylesheet" href="/static/css/common.css">
+    <link rel="stylesheet" href="/static/css/main.css">
     {% block extra_css %}{% endblock %}
 </head>
 <body>
@@ -13,6 +13,7 @@
         <nav>
             <a href="/" id="nav-dashboard">📊 Dashboard</a>
             <a href="/upload" id="nav-upload">📤 Carica</a>
+            <a href="/rules" id="nav-rules">⚙️ Regole</a>
         </nav>
         {% block header_extra %}{% endblock %}
     </header>
@@ -33,10 +34,14 @@
             const navUpload = document.getElementById('nav-upload');
             const navDashboard = document.getElementById('nav-dashboard');
             
+            const navRules = document.getElementById('nav-rules');
+            
             if (path === '/' || path === '/dashboard') {
                 if (navDashboard) navDashboard.classList.add('active');
             } else if (path === '/upload') {
                 if (navUpload) navUpload.classList.add('active');
+            } else if (path === '/rules') {
+                if (navRules) navRules.classList.add('active');
             }
         })();
     </script>

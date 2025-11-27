@@ -1,0 +1,11 @@
+{
+  "DEVA": {
+    "detect": ["DEVA", "Armanini", "Società Semplice Agricola"],
+    "instructions": "Il totale non è presente. Calcola somma dei KG delle righe.",
+    "overrides": {
+      "totale_kg_mode": "sum_rows",
+      "multipage": true
+    }
+  }
+}
+

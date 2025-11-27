@@ -1,0 +1,330 @@
+{% extends "base.html" %}
+
+{% block title %}Gestione Regole{% endblock %}
+
+{% block header_title %}⚙️ Gestione Regole DDT{% endblock %}
+
+{% block extra_css %}
+{% endblock %}
+
+{% block messages %}
+    <div id="message" class="message hidden"></div>
+{% endblock %}
+
+{% block content %}
+    <div class="rules-container">
+        <div class="section">
+            <h2>📋 Regole Attive</h2>
+            <div style="background: linear-gradient(135deg, var(--perla) 0%, var(--spuma-bianca) 100%); padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid var(--acqua-azzurra);">
+                <p style="color: var(--oceano-profondo); margin: 0; line-height: 1.6;">
+                    <strong>ℹ️ Come funziona:</strong> Quando carichi un DDT PDF, il sistema estrae il testo e cerca automaticamente le keyword che hai definito. Se trova una corrispondenza, applica le istruzioni speciali che hai scritto, che vengono aggiunte al prompt AI per migliorare l'estrazione dati.
+                </p>
+            </div>
+            <button id="add-rule-btn" class="btn btn-add">➕ Aggiungi Nuova Regola</button>
+            <div id="rules-list">
+                <div class="empty-state">Caricamento regole...</div>
+            </div>
+        </div>
+
+        <div class="section reprocess-section">
+            <h2>🔄 Riprocessa DDT</h2>
+            <p style="color: var(--oceano-medio); margin-bottom: 15px;">Riprocessa un DDT esistente usando le regole aggiornate. Inserisci il numero documento del DDT che vuoi riprocessare.</p>
+            <div class="reprocess-form">
+                <input type="text" id="reprocess-doc-number" placeholder="Numero documento DDT (es: DDT-12345)">
+                <button id="reprocess-btn" class="btn btn-save">Riprocessa</button>
+            </div>
+            <div id="reprocess-result" class="hidden"></div>
+        </div>
+    </div>
+
+    <!-- Modal per aggiunta/modifica regola -->
+    <div id="rule-modal" class="hidden">
+        <div>
+            <h2 id="modal-title">Aggiungi Regola</h2>
+            <form id="rule-form">
+                <input type="hidden" id="rule-name-input" name="name">
+                
+                <div class="form-group">
+                    <label for="rule-name-display">Nome Regola:</label>
+                    <input type="text" id="rule-name-display" name="name-display" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="rule-keywords">Keyword di Rilevamento:</label>
+                    <input type="text" id="rule-keywords" name="keywords" placeholder="es: DEVA, Armanini, Società Semplice Agricola" required>
+                    <small>Inserisci le parole chiave (nomi azienda, marchi, ecc.) che identificano questo fornitore, separate da virgola. Il sistema cercherà queste parole nel testo estratto dal PDF.</small>
+                </div>
+
+                <div class="form-group">
+                    <label for="rule-instructions">Istruzioni Speciali per l'AI:</label>
+                    <textarea id="rule-instructions" name="instructions" required placeholder="Inserisci qui le istruzioni specifiche per questo fornitore. Ad esempio:&#10;&#10;• Il totale non è presente. Calcola somma dei KG delle righe.&#10;• Il numero documento è sempre preceduto da 'DDT-'.&#10;• Controlla la seconda pagina se la prima è solo intestazione.&#10;• Il peso è sempre espresso in chilogrammi."></textarea>
+                    <small>Queste istruzioni verranno aggiunte automaticamente al prompt AI quando viene rilevato questo fornitore.</small>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="rule-multipage" name="multipage">
+                        Documento multipagina
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="rule-sum-rows" name="sum_rows">
+                        Calcola totale_kg come somma delle righe
+                    </label>
+                </div>
+
+                <div style="display: flex; gap: 15px; margin-top: 25px; justify-content: flex-end;">
+                    <button type="button" id="cancel-btn" class="btn btn-cancel">Annulla</button>
+                    <button type="submit" class="btn btn-save">💾 Salva Regola</button>
+                </div>
+            </form>
+        </div>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+    <script>
+        let rules = {};
+
+        function showMessage(text, type = 'success') {
+            const msgDiv = document.getElementById('message');
+            msgDiv.textContent = text;
+            msgDiv.className = `message ${type}`;
+            msgDiv.classList.remove('hidden');
+            setTimeout(() => {
+                msgDiv.classList.add('hidden');
+            }, 5000);
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        async function loadRules() {
+            try {
+                const res = await fetch('/api/rules');
+                const data = await res.json();
+                rules = data.rules || {};
+                renderRules();
+            } catch (error) {
+                console.error('Errore caricamento regole:', error);
+                showMessage('Errore durante il caricamento delle regole', 'error');
+            }
+        }
+
+        function renderRules() {
+            const container = document.getElementById('rules-list');
+            
+            if (Object.keys(rules).length === 0) {
+                container.innerHTML = '<div class="empty-state">Nessuna regola configurata. Aggiungine una per iniziare.</div>';
+                return;
+            }
+
+            container.innerHTML = Object.entries(rules).map(([name, rule]) => {
+                const keywords = rule.detect || [];
+                const instructions = escapeHtml(rule.instructions || '');
+                const overrides = rule.overrides || {};
+                
+                return `
+                    <div class="rule-item" data-rule-name="${escapeHtml(name)}">
+                        <div class="rule-header">
+                            <div class="rule-name">${escapeHtml(name)}</div>
+                            <div class="rule-actions">
+                                <button class="btn btn-edit" onclick="editRule('${escapeHtml(name)}')">✏️ Modifica</button>
+                                <button class="btn btn-delete" onclick="deleteRule('${escapeHtml(name)}')">🗑️ Elimina</button>
+                            </div>
+                        </div>
+                        <div class="rule-details">
+                            <label>Keyword:</label>
+                            <div class="keywords-list">
+                                ${keywords.map(k => `<span class="keyword-tag">${escapeHtml(k)}</span>`).join('')}
+                            </div>
+                            <label>Istruzioni AI:</label>
+                            <div class="rule-instructions">
+                                ${instructions}
+                            </div>
+                            ${overrides.multipage ? '<div class="override-indicator">Multipagina</div>' : ''}
+                            ${overrides.totale_kg_mode === 'sum_rows' ? '<div class="override-indicator">Calcola totale come somma righe</div>' : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function editRule(name) {
+            const rule = rules[name];
+            if (!rule) return;
+
+            document.getElementById('rule-name-input').value = name;
+            document.getElementById('rule-name-display').value = name;
+            document.getElementById('rule-keywords').value = (rule.detect || []).join(', ');
+            document.getElementById('rule-instructions').value = rule.instructions || '';
+            document.getElementById('rule-multipage').checked = rule.overrides?.multipage || false;
+            document.getElementById('rule-sum-rows').checked = rule.overrides?.totale_kg_mode === 'sum_rows';
+            document.getElementById('modal-title').textContent = 'Modifica Regola';
+            document.getElementById('rule-name-display').disabled = true;
+            
+            document.getElementById('rule-modal').classList.remove('hidden');
+        }
+
+        function addRule() {
+            document.getElementById('rule-form').reset();
+            document.getElementById('rule-name-input').value = '';
+            document.getElementById('rule-name-display').disabled = false;
+            document.getElementById('modal-title').textContent = 'Aggiungi Nuova Regola';
+            document.getElementById('rule-modal').classList.remove('hidden');
+        }
+
+        async function saveRule(formData) {
+            const name = formData.get('name-display') || formData.get('name');
+            const keywords = formData.get('keywords').split(',').map(k => k.trim()).filter(k => k);
+            const instructions = formData.get('instructions');
+            const multipage = formData.get('multipage') === 'on';
+            const sumRows = formData.get('sum_rows') === 'on';
+
+            const ruleData = {
+                detect: keywords,
+                instructions: instructions,
+                overrides: {}
+            };
+
+            if (multipage) {
+                ruleData.overrides.multipage = true;
+            }
+            if (sumRows) {
+                ruleData.overrides.totale_kg_mode = 'sum_rows';
+            }
+
+            try {
+                const isEdit = document.getElementById('rule-name-input').value !== '';
+                const url = isEdit ? `/api/rules/${name}` : '/api/rules/add';
+                const method = isEdit ? 'PUT' : 'POST';
+                
+                const payload = isEdit ? ruleData : { name: name, rule: ruleData };
+
+                const res = await fetch(url, {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await res.json();
+
+                if (!res.ok) {
+                    throw new Error(data.detail || 'Errore durante il salvataggio');
+                }
+
+                showMessage(`Regola '${name}' salvata con successo!`);
+                document.getElementById('rule-modal').classList.add('hidden');
+                await loadRules();
+            } catch (error) {
+                console.error('Errore salvataggio regola:', error);
+                showMessage(`Errore: ${error.message}`, 'error');
+            }
+        }
+
+        async function deleteRule(name) {
+            if (!confirm(`Sei sicuro di voler eliminare la regola "${name}"?`)) {
+                return;
+            }
+
+            try {
+                const res = await fetch(`/api/rules/${name}`, {
+                    method: 'DELETE'
+                });
+
+                const data = await res.json();
+
+                if (!res.ok) {
+                    throw new Error(data.detail || 'Errore durante l\'eliminazione');
+                }
+
+                showMessage(`Regola '${name}' eliminata con successo!`);
+                await loadRules();
+            } catch (error) {
+                console.error('Errore eliminazione regola:', error);
+                showMessage(`Errore: ${error.message}`, 'error');
+            }
+        }
+
+        async function reprocessDDT() {
+            const docNumber = document.getElementById('reprocess-doc-number').value.trim();
+            if (!docNumber) {
+                showMessage('Inserisci un numero documento', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('reprocess-btn');
+            const originalText = btn.textContent;
+            const resultDiv = document.getElementById('reprocess-result');
+
+            try {
+                btn.disabled = true;
+                btn.textContent = '⏳ Riprocessamento...';
+                resultDiv.classList.add('hidden');
+
+                const res = await fetch(`/reprocess/${encodeURIComponent(docNumber)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ numero_documento: docNumber })
+                });
+
+                const data = await res.json();
+
+                if (!res.ok) {
+                    throw new Error(data.detail || 'Errore durante il reprocessing');
+                }
+
+                resultDiv.innerHTML = `
+                    <div class="message success">
+                        ✅ ${data.message}<br>
+                        <strong>Dati estratti:</strong><br>
+                        Data: ${data.data.data}<br>
+                        Mittente: ${escapeHtml(data.data.mittente)}<br>
+                        Destinatario: ${escapeHtml(data.data.destinatario)}<br>
+                        Totale Kg: ${data.data.totale_kg}
+                    </div>
+                `;
+                resultDiv.classList.remove('hidden');
+                showMessage('DDT riprocessato con successo!');
+            } catch (error) {
+                console.error('Errore reprocessing:', error);
+                resultDiv.innerHTML = `
+                    <div class="message error">
+                        ❌ Errore: ${escapeHtml(error.message)}
+                    </div>
+                `;
+                resultDiv.classList.remove('hidden');
+                showMessage(`Errore: ${error.message}`, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
+        }
+
+        // Event listeners
+        document.getElementById('add-rule-btn').addEventListener('click', addRule);
+        document.getElementById('cancel-btn').addEventListener('click', () => {
+            document.getElementById('rule-modal').classList.add('hidden');
+        });
+        document.getElementById('rule-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            saveRule(formData);
+        });
+        document.getElementById('reprocess-btn').addEventListener('click', reprocessDDT);
+        document.getElementById('reprocess-doc-number').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                reprocessDDT();
+            }
+        });
+
+        // Carica regole all'avvio
+        loadRules();
+    </script>
+{% endblock %}
+

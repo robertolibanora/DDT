@@ -9,3 +9,4 @@ python-dotenv
 pydantic>=2.0.0
 pdf2image
 Pillow
+pdfplumber

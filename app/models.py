@@ -2,7 +2,7 @@
 Modelli Pydantic per validazione e normalizzazione dati DDT
 """
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
@@ -93,6 +93,39 @@ class DDTData(BaseModel):
                 "destinatario": "Mario Rossi & C.",
                 "numero_documento": "DDT-12345",
                 "totale_kg": 1250.5
+            }
+        }
+
+
+class RuleOverride(BaseModel):
+    """Modello per gli override di una regola"""
+    totale_kg_mode: Optional[str] = Field(None, description="Modalità calcolo totale kg (es: 'sum_rows')")
+    multipage: Optional[bool] = Field(None, description="Se il documento è multipagina")
+
+
+class RuleData(BaseModel):
+    """Modello per una regola completa"""
+    detect: List[str] = Field(..., min_length=1, description="Lista di keyword per rilevare la regola")
+    instructions: str = Field(..., min_length=1, description="Istruzioni specifiche per l'estrazione")
+    overrides: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Override per comportamenti speciali")
+    
+    @field_validator('detect')
+    @classmethod
+    def validate_detect(cls, v: List[str]) -> List[str]:
+        """Valida che detect contenga almeno un elemento"""
+        if not v or len(v) == 0:
+            raise ValueError("La lista 'detect' deve contenere almeno un keyword")
+        return [keyword.strip() for keyword in v if keyword.strip()]
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "detect": ["DEVA", "Armanini"],
+                "instructions": "Il totale non è presente. Calcola somma dei KG delle righe.",
+                "overrides": {
+                    "totale_kg_mode": "sum_rows",
+                    "multipage": True
+                }
             }
         }
 

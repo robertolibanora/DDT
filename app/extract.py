@@ -1,6 +1,7 @@
 """
 Estrazione dati da DDT PDF usando OpenAI Vision
 Con gestione robusta degli errori e validazione dati
+Supporto per regole dinamiche e estrazione testo
 """
 import base64
 import logging
@@ -11,12 +12,13 @@ from openai.types.chat import ChatCompletion
 from app.config import OPENAI_API_KEY, MODEL
 from app.models import DDTData
 from app.utils import normalize_date, normalize_float, normalize_text, clean_company_name
+from app.rules.rules import detect_rule, build_prompt_additions, reload_rules
 
 logger = logging.getLogger(__name__)
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-PROMPT = """Sei un esperto estrattore di dati da Documenti di Trasporto (DDT) italiani.
+BASE_PROMPT = """Sei un esperto estrattore di dati da Documenti di Trasporto (DDT) italiani.
 La tua missione è estrarre SOLO i seguenti campi e restituire UNICAMENTE un JSON valido e corretto.
 
 CAMPI RICERCATI:
@@ -71,6 +73,73 @@ ESEMPIO OUTPUT CORRETTO:
 
 IMPORTANTE: Restituisci SOLO il JSON, senza commenti, senza spiegazioni."""
 
+
+def extract_text_from_pdf(file_path: str) -> str:
+    """
+    Estrae il testo grezzo da un PDF per il rilevamento delle regole
+    
+    Args:
+        file_path: Percorso del file PDF
+        
+    Returns:
+        Testo estratto dal PDF
+    """
+    try:
+        import pdfplumber
+        
+        text_parts = []
+        with pdfplumber.open(file_path) as pdf:
+            # Estrai testo da tutte le pagine (limite ragionevole: prime 5 pagine)
+            max_pages = min(5, len(pdf.pages))
+            for i in range(max_pages):
+                page = pdf.pages[i]
+                page_text = page.extract_text()
+                if page_text:
+                    text_parts.append(page_text)
+        
+        return "\n".join(text_parts)
+    except ImportError:
+        logger.warning("pdfplumber non installato, uso fallback OCR")
+        # Fallback: prova a usare pdf2image + OCR se disponibile
+        try:
+            from pdf2image import convert_from_bytes
+            from io import BytesIO
+            
+            with open(file_path, "rb") as f:
+                pdf_bytes = f.read()
+            
+            images = convert_from_bytes(pdf_bytes, first_page=1, last_page=1, dpi=200)
+            if images:
+                # Per ora restituiamo una stringa vuota se non abbiamo OCR
+                # In futuro si potrebbe integrare pytesseract
+                return ""
+        except Exception as e:
+            logger.warning(f"Errore estrazione testo fallback: {e}")
+            return ""
+    except Exception as e:
+        logger.warning(f"Errore estrazione testo PDF: {e}")
+        return ""
+
+
+def build_dynamic_prompt(rule_name: Optional[str] = None) -> str:
+    """
+    Costruisce il prompt dinamico con eventuali regole aggiuntive
+    
+    Args:
+        rule_name: Nome della regola da applicare (opzionale)
+        
+    Returns:
+        Prompt completo con eventuali aggiunte
+    """
+    prompt = BASE_PROMPT
+    
+    if rule_name:
+        additions = build_prompt_additions(rule_name)
+        if additions:
+            prompt += additions
+    
+    return prompt
+
 def extract_from_pdf(file_path: str) -> Dict[str, Any]:
     """
     Estrae dati strutturati da un PDF DDT usando OpenAI Vision
@@ -98,6 +167,18 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
             raise ValueError(f"Il file {file_path} è vuoto")
         
         logger.info(f"Elaborazione PDF: {file_path} ({len(pdf_bytes)} bytes)")
+        
+        # Estrai testo per rilevamento regole
+        pdf_text = extract_text_from_pdf(file_path)
+        rule_name = detect_rule(pdf_text) if pdf_text else None
+        
+        if rule_name:
+            logger.info(f"Regola '{rule_name}' rilevata per questo documento")
+        else:
+            logger.info("Nessuna regola specifica rilevata, uso prompt standard")
+        
+        # Costruisci prompt dinamico
+        dynamic_prompt = build_dynamic_prompt(rule_name)
         
         # Converti PDF in immagini (OpenAI Vision richiede immagini, non PDF)
         try:
@@ -130,7 +211,7 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
             response: ChatCompletion = client.chat.completions.create(
                 model=MODEL,
                 messages=[
-                    {"role": "system", "content": PROMPT},
+                    {"role": "system", "content": dynamic_prompt},
                     {
                         "role": "user",
                         "content": [

@@ -14,6 +14,7 @@ from app.extract import extract_from_pdf
 from app.excel import append_to_excel, read_excel_as_dict, clear_all_ddt
 from app.config import INBOX_DIR
 from app.logging_config import setup_logging
+from app.routers import rules_router, reprocess_router
 
 # Configura logging
 setup_logging()
@@ -77,6 +78,7 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 if not os.path.exists(INBOX_DIR):
     os.makedirs(INBOX_DIR)
 
+# IMPORTANTE: Registra le route HTML PRIMA dei router API per evitare conflitti
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     """Pagina principale - Dashboard"""
@@ -131,6 +133,15 @@ async def dashboard(request: Request):
 async def upload_page(request: Request):
     """Pagina upload DDT"""
     return templates.TemplateResponse("upload.html", {"request": request})
+
+@app.get("/rules", response_class=HTMLResponse)
+async def rules_page(request: Request):
+    """Pagina gestione regole - DEVE essere prima del router API"""
+    return templates.TemplateResponse("rules.html", {"request": request})
+
+# Include i router per regole e reprocessing (dopo le route HTML per evitare conflitti)
+app.include_router(rules_router.router)
+app.include_router(reprocess_router.router)
 
 @app.get("/data")
 async def get_data():
