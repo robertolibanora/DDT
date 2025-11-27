@@ -1,0 +1,259 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard DDT{% endblock %}
+
+{% block header_title %}📦 Dashboard DDT{% endblock %}
+
+{% block extra_css %}
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+{% endblock %}
+
+{% block header_extra %}
+    <div class="last-update">
+        Ultimo aggiornamento: <span id="last-update">--</span>
+        <span class="refresh-indicator" id="refresh-indicator">
+            <span class="spinner"></span>
+        </span>
+    </div>
+{% endblock %}
+
+{% block messages %}
+    <div id="error-message" class="message error hidden"></div>
+{% endblock %}
+
+{% block content %}
+    <div id="stats">
+        <div class="stat-item">
+            <div class="stat-label">Totale DDT</div>
+            <div class="stat-value" id="tot-ddt">0</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-label">Totale Kg</div>
+            <div class="stat-value" id="tot-kg">0.00</div>
+        </div>
+        <div class="stat-item stat-actions">
+            <button id="clear-all-btn" class="btn-clear" title="Cancella tutti i DDT">
+                🗑️ Svuota DDT
+            </button>
+        </div>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Data</th>
+                <th>Mittente</th>
+                <th>Destinatario</th>
+                <th>Numero Doc.</th>
+                <th>Kg</th>
+            </tr>
+        </thead>
+        <tbody id="table-body">
+            <tr>
+                <td colspan="5" class="loading">
+                    <div class="spinner"></div> Caricamento dati...
+                </td>
+            </tr>
+        </tbody>
+    </table>
+{% endblock %}
+
+{% block scripts %}
+    <script>
+        let refreshInterval;
+        let errorCount = 0;
+        const MAX_ERRORS = 3;
+
+        function showError(message) {
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.textContent = message;
+            errorDiv.classList.remove('hidden');
+            errorCount++;
+        }
+
+        function hideError() {
+            document.getElementById('error-message').classList.add('hidden');
+            errorCount = 0;
+        }
+
+        function formatDate(dateStr) {
+            if (!dateStr || dateStr === '1900-01-01') return '-';
+            try {
+                const [year, month, day] = dateStr.split('-');
+                return `${day}/${month}/${year}`;
+            } catch {
+                return dateStr;
+            }
+        }
+
+        function formatNumber(num) {
+            const n = parseFloat(num);
+            return isNaN(n) ? '0.00' : n.toFixed(2);
+        }
+
+        async function refreshData() {
+            const indicator = document.getElementById('refresh-indicator');
+            indicator.classList.add('active');
+            
+            try {
+                const res = await fetch("/data");
+                
+                if (!res.ok) {
+                    throw new Error(`Errore ${res.status}: ${res.statusText}`);
+                }
+                
+                const data = await res.json();
+                
+                if (!data || !Array.isArray(data.rows)) {
+                    throw new Error('Formato dati non valido');
+                }
+                
+                hideError();
+                renderTable(data.rows);
+                updateStats(data.rows);
+                updateLastUpdateTime();
+                
+            } catch (error) {
+                console.error('Errore refresh dati:', error);
+                
+                if (errorCount < MAX_ERRORS) {
+                    showError(`Errore durante il caricamento: ${error.message}`);
+                } else {
+                    showError('Errore persistente nel caricamento dati. Controlla la connessione.');
+                }
+            } finally {
+                indicator.classList.remove('active');
+            }
+        }
+
+        function renderTable(rows) {
+            const tbody = document.getElementById("table-body");
+            
+            if (rows.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="5" class="empty-state">
+                            Nessun DDT presente. Carica un DDT per iniziare.
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+            
+            tbody.innerHTML = rows.map(row => {
+                const kg = formatNumber(row.totale_kg);
+                return `
+                    <tr>
+                        <td>${formatDate(row.data)}</td>
+                        <td>${escapeHtml(row.mittente || '-')}</td>
+                        <td>${escapeHtml(row.destinatario || '-')}</td>
+                        <td>${escapeHtml(row.numero_documento || '-')}</td>
+                        <td>${kg}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function updateStats(rows) {
+            const totalDDT = rows.length;
+            let totalKg = 0;
+            
+            rows.forEach(row => {
+                const kg = parseFloat(row.totale_kg || 0);
+                if (!isNaN(kg)) {
+                    totalKg += kg;
+                }
+            });
+            
+            document.getElementById("tot-ddt").textContent = totalDDT;
+            document.getElementById("tot-kg").textContent = formatNumber(totalKg);
+            
+            // Mostra/nascondi pulsante svuota in base ai dati presenti
+            const clearBtn = document.getElementById('clear-all-btn');
+            if (clearBtn) {
+                const statActions = clearBtn.closest('.stat-actions');
+                if (statActions) {
+                    if (totalDDT === 0) {
+                        statActions.style.display = 'none';
+                    } else {
+                        statActions.style.display = 'flex';
+                    }
+                }
+            }
+        }
+
+        function updateLastUpdateTime() {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString('it-IT', { 
+                hour: '2-digit', 
+                minute: '2-digit',
+                second: '2-digit'
+            });
+            document.getElementById('last-update').textContent = timeStr;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Funzione per svuotare tutti i DDT
+        async function clearAllDDT() {
+            // Conferma prima di cancellare
+            const confirmed = confirm('⚠️ ATTENZIONE!\n\nStai per cancellare TUTTI i DDT dal database.\nQuesta operazione non può essere annullata.\n\nSei sicuro di voler continuare?');
+            
+            if (!confirmed) {
+                return;
+            }
+            
+            const clearBtn = document.getElementById('clear-all-btn');
+            const originalText = clearBtn.textContent;
+            
+            try {
+                clearBtn.disabled = true;
+                clearBtn.textContent = '⏳ Cancellazione...';
+                
+                const response = await fetch('/data/clear', {
+                    method: 'POST'
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Errore durante la cancellazione');
+                }
+                
+                // Mostra messaggio di successo
+                showError(`✅ ${data.message || 'Tutti i DDT sono stati cancellati con successo!'}`);
+                setTimeout(() => hideError(), 5000);
+                
+                // Ricarica i dati
+                await refreshData();
+                
+            } catch (error) {
+                console.error('Errore cancellazione:', error);
+                showError(`❌ Errore: ${error.message}`);
+            } finally {
+                clearBtn.disabled = false;
+                clearBtn.textContent = originalText;
+            }
+        }
+        
+        // Aggiungi event listener al pulsante
+        document.getElementById('clear-all-btn').addEventListener('click', clearAllDDT);
+
+        // Avvia il refresh automatico ogni 3 secondi
+        refreshInterval = setInterval(refreshData, 3000);
+        
+        // Carica immediatamente
+        refreshData();
+        
+        // Pulisci l'intervallo quando la pagina viene chiusa
+        window.addEventListener('beforeunload', () => {
+            if (refreshInterval) {
+                clearInterval(refreshInterval);
+            }
+        });
+    </script>
+{% endblock %}

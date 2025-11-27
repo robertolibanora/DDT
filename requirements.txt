@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+python-multipart
+openai>=1.35.13
+watchdog
+openpyxl
+jinja2
+python-dotenv
+pydantic>=2.0.0
+pdf2image
+Pillow

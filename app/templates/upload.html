@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+
+{% block title %}Carica DDT{% endblock %}
+
+{% block header_title %}📤 Carica DDT{% endblock %}
+
+{% block extra_css %}
+    <link rel="stylesheet" href="/static/css/upload.css">
+{% endblock %}
+
+{% block content %}
+    <div class="card">
+        <div id="message" class="message hidden"></div>
+        
+        <form id="upload-form" enctype="multipart/form-data">
+            <div class="form-group">
+                <label for="file-input">Seleziona un file DDT (PDF)</label>
+                <input 
+                    type="file" 
+                    id="file-input" 
+                    name="file" 
+                    accept="application/pdf"
+                    required
+                >
+                <small class="form-help">Solo file PDF sono supportati. Massimo 10MB.</small>
+            </div>
+
+            <div id="file-info" class="file-info hidden">
+                <div class="file-preview">
+                    <span class="file-icon">📄</span>
+                    <div class="file-details">
+                        <div class="file-name" id="file-name"></div>
+                        <div class="file-size" id="file-size"></div>
+                    </div>
+                    <button type="button" class="btn-remove" id="btn-remove">✕</button>
+                </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary" id="submit-btn">
+                <span id="btn-text">🚀 Carica e Processa</span>
+                <span id="btn-spinner" class="spinner hidden"></span>
+            </button>
+    </form>
+    </div>
+
+    <div class="card">
+        <h2>ℹ️ Informazioni</h2>
+        <ul class="info-list">
+            <li>✅ Il sistema estrae automaticamente i dati dal DDT</li>
+            <li>✅ I dati vengono salvati in Excel e visualizzati nella dashboard</li>
+            <li>✅ Puoi anche copiare PDF nella cartella <code>inbox/</code> per elaborazione automatica</li>
+            <li>✅ Tutti i campi vengono validati e normalizzati</li>
+        </ul>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+    <script>
+        const form = document.getElementById('upload-form');
+        const fileInput = document.getElementById('file-input');
+        const fileInfo = document.getElementById('file-info');
+        const fileName = document.getElementById('file-name');
+        const fileSize = document.getElementById('file-size');
+        const btnRemove = document.getElementById('btn-remove');
+        const submitBtn = document.getElementById('submit-btn');
+        const btnText = document.getElementById('btn-text');
+        const btnSpinner = document.getElementById('btn-spinner');
+        const message = document.getElementById('message');
+
+        function showMessage(text, type = 'info') {
+            message.textContent = text;
+            message.className = `message ${type}`;
+            message.classList.remove('hidden');
+            
+            if (type === 'success' || type === 'error') {
+                setTimeout(() => {
+                    message.classList.add('hidden');
+                }, 5000);
+            }
+        }
+
+        function hideMessage() {
+            message.classList.add('hidden');
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        }
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                if (file.type !== 'application/pdf') {
+                    showMessage('⚠️ Solo file PDF sono supportati!', 'error');
+                    fileInput.value = '';
+                    return;
+                }
+
+                if (file.size > 10 * 1024 * 1024) {
+                    showMessage('⚠️ Il file è troppo grande! Massimo 10MB.', 'error');
+                    fileInput.value = '';
+                    return;
+                }
+
+                fileName.textContent = file.name;
+                fileSize.textContent = formatFileSize(file.size);
+                fileInfo.classList.remove('hidden');
+                hideMessage();
+            }
+        });
+
+        btnRemove.addEventListener('click', () => {
+            fileInput.value = '';
+            fileInfo.classList.add('hidden');
+            hideMessage();
+        });
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const file = fileInput.files[0];
+            if (!file) {
+                showMessage('⚠️ Seleziona un file prima di caricare', 'error');
+                return;
+            }
+
+            // Mostra stato di caricamento
+            submitBtn.disabled = true;
+            btnText.textContent = '⏳ Elaborazione in corso...';
+            btnSpinner.classList.remove('hidden');
+            hideMessage();
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Errore durante il caricamento');
+                }
+
+                showMessage('✅ DDT caricato e processato con successo!', 'success');
+                
+                // Reset form dopo 2 secondi
+                setTimeout(() => {
+                    form.reset();
+                    fileInfo.classList.add('hidden');
+                    // Redirect alla dashboard (homepage) dopo 3 secondi
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 3000);
+                }, 2000);
+
+            } catch (error) {
+                console.error('Errore upload:', error);
+                showMessage(`❌ Errore: ${error.message}`, 'error');
+            } finally {
+                submitBtn.disabled = false;
+                btnText.textContent = '🚀 Carica e Processa';
+                btnSpinner.classList.add('hidden');
+            }
+        });
+    </script>
+{% endblock %}

@@ -1,0 +1,207 @@
+/* 
+ * Stili specifici per la Dashboard DDT
+ * Usa common.css per gli stili base
+ */
+
+/* Stats container */
+#stats {
+    display: flex;
+    gap: 30px;
+    flex-wrap: wrap;
+    padding: 25px;
+    background: linear-gradient(135deg, var(--schiuma-bianca) 0%, var(--perla) 100%);
+    border-radius: 15px;
+    margin-bottom: 25px;
+    box-shadow: 0 4px 15px var(--ombreggiatura);
+    border: 2px solid var(--acqua-azzurra);
+}
+
+.stat-item {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 150px;
+    padding: 15px;
+    background: var(--schiuma-bianca);
+    border-radius: 10px;
+    box-shadow: 0 2px 8px var(--ombreggiatura);
+    transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.stat-item:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 6px 20px var(--ombra-profonda);
+}
+
+.stat-label {
+    font-size: 0.85em;
+    color: var(--oceano-medio);
+    margin-bottom: 8px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.stat-value {
+    font-size: 2em;
+    font-weight: bold;
+    background: linear-gradient(135deg, var(--oceano-profondo) 0%, var(--acqua-azzurra) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.stat-actions {
+    justify-content: center;
+    align-items: center;
+    flex-direction: row !important;
+    display: none; /* Nascondi inizialmente, verrà mostrato via JS se ci sono DDT */
+}
+
+.btn-clear {
+    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+    color: white;
+    border: none;
+    padding: 12px 20px;
+    border-radius: 8px;
+    font-size: 0.95em;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3);
+}
+
+.btn-clear:hover {
+    background: linear-gradient(135deg, #c82333 0%, #bd2130 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(220, 53, 69, 0.4);
+}
+
+.btn-clear:active {
+    transform: translateY(0);
+}
+
+.btn-clear:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.last-update {
+    font-size: 0.9em;
+    color: var(--perla);
+    margin-top: 15px;
+    opacity: 0.9;
+    position: relative;
+    z-index: 1;
+}
+
+.refresh-indicator {
+    display: inline-block;
+    margin-left: 10px;
+    opacity: 0;
+    transition: opacity 0.3s;
+}
+
+.refresh-indicator.active {
+    opacity: 1;
+}
+
+/* Tabella */
+table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: var(--schiuma-bianca);
+    border-radius: 15px;
+    overflow: hidden;
+    box-shadow: 0 8px 24px var(--ombra-profonda);
+    border: 2px solid var(--acqua-azzurra);
+}
+
+thead {
+    background: linear-gradient(135deg, var(--oceano-profondo) 0%, var(--oceano-medio) 100%);
+    color: var(--schiuma-bianca);
+}
+
+th {
+    padding: 18px 15px;
+    text-align: left;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-size: 0.9em;
+    border-bottom: 3px solid var(--acqua-azzurra);
+}
+
+tbody tr {
+    border-bottom: 1px solid var(--perla);
+    transition: background-color 0.3s ease;
+}
+
+tbody tr:hover {
+    background: linear-gradient(90deg, var(--perla) 0%, var(--spuma-bianca) 100%);
+    transform: scale(1.01);
+}
+
+tbody tr:last-child {
+    border-bottom: none;
+}
+
+td {
+    padding: 15px;
+    color: var(--oceano-profondo);
+}
+
+.empty-state {
+    text-align: center;
+    padding: 80px 20px;
+    color: var(--oceano-medio);
+    font-size: 1.2em;
+}
+
+.empty-state::before {
+    content: '🌊';
+    display: block;
+    font-size: 4em;
+    margin-bottom: 20px;
+    opacity: 0.6;
+}
+
+/* Animazioni */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+tbody tr {
+    animation: fadeIn 0.5s ease-out;
+}
+
+/* Stile per numeri */
+td:last-child {
+    font-weight: 600;
+    color: var(--oceano-profondo);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    #stats {
+        flex-direction: column;
+        gap: 15px;
+    }
+    
+    table {
+        font-size: 0.9em;
+    }
+    
+    th, td {
+        padding: 10px 8px;
+    }
+}

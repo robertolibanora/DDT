@@ -1,0 +1,93 @@
+/* Stili specifici per la pagina Upload */
+
+.form-help {
+    display: block;
+    margin-top: 8px;
+    font-size: 0.85em;
+    color: var(--oceano-medio);
+    opacity: 0.8;
+}
+
+.file-info {
+    margin: 20px 0;
+    padding: 15px;
+    background: var(--perla);
+    border-radius: 10px;
+    border: 2px solid var(--acqua-azzurra);
+}
+
+.file-preview {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.file-icon {
+    font-size: 2.5em;
+}
+
+.file-details {
+    flex: 1;
+}
+
+.file-name {
+    font-weight: 600;
+    color: var(--oceano-profondo);
+    margin-bottom: 5px;
+}
+
+.file-size {
+    font-size: 0.9em;
+    color: var(--oceano-medio);
+}
+
+.btn-remove {
+    background: var(--corallo);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 30px;
+    height: 30px;
+    cursor: pointer;
+    font-size: 1.2em;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease;
+}
+
+.btn-remove:hover {
+    background: #e55555;
+    transform: scale(1.1);
+}
+
+.info-list {
+    list-style: none;
+    padding: 0;
+}
+
+.info-list li {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--perla);
+    color: var(--oceano-profondo);
+}
+
+.info-list li:last-child {
+    border-bottom: none;
+}
+
+.info-list code {
+    background: var(--perla);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'Monaco', 'Courier New', monospace;
+    font-size: 0.9em;
+    color: var(--oceano-profondo);
+}
+
+.card h2 {
+    color: var(--oceano-profondo);
+    margin-bottom: 15px;
+    font-size: 1.3em;
+}
+
