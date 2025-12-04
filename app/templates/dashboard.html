@@ -45,11 +45,12 @@
                 <th>Destinatario</th>
                 <th>Numero Doc.</th>
                 <th>Kg</th>
+                <th>Azioni</th>
             </tr>
         </thead>
         <tbody id="table-body">
             <tr>
-                <td colspan="5" class="loading">
+                <td colspan="6" class="loading">
                     <div class="spinner"></div> Caricamento dati...
                 </td>
             </tr>
@@ -87,15 +88,18 @@
 
         function formatNumber(num) {
             const n = parseFloat(num);
-            return isNaN(n) ? '0.00' : n.toFixed(2);
+            return isNaN(n) ? '0.000' : n.toFixed(3);
         }
 
-        async function refreshData() {
+        // Esponi refreshData globalmente per il modal
+        window.refreshData = async function refreshData() {
             const indicator = document.getElementById('refresh-indicator');
             indicator.classList.add('active');
             
             try {
-                const res = await fetch("/data");
+                const res = await fetch("/data", {
+                    credentials: 'include'
+                });
                 
                 if (!res.ok) {
                     throw new Error(`Errore ${res.status}: ${res.statusText}`);
@@ -131,7 +135,7 @@
             if (rows.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="5" class="empty-state">
+                        <td colspan="6" class="empty-state">
                             Nessun DDT presente. Carica un DDT per iniziare.
                         </td>
                     </tr>
@@ -139,18 +143,43 @@
                 return;
             }
             
-            tbody.innerHTML = rows.map(row => {
+            // I dati dal backend sono già ordinati dal più recente (ultimo in alto)
+            // Non serve invertire, manteniamo l'ordine originale
+            tbody.innerHTML = rows.map((row, index) => {
                 const kg = formatNumber(row.totale_kg);
+                // Evidenzia la prima riga (ultimo documento inserito)
+                const isNewest = index === 0;
+                const rowClass = isNewest ? 'newest-row' : '';
+                const numeroDoc = escapeHtml(row.numero_documento || '-');
+                const mittente = escapeHtml(row.mittente || '');
                 return `
-                    <tr>
+                    <tr class="${rowClass}">
                         <td>${formatDate(row.data)}</td>
-                        <td>${escapeHtml(row.mittente || '-')}</td>
+                        <td>${mittente || '-'}</td>
                         <td>${escapeHtml(row.destinatario || '-')}</td>
-                        <td>${escapeHtml(row.numero_documento || '-')}</td>
+                        <td>${numeroDoc}</td>
                         <td>${kg}</td>
+                        <td>
+                            <button class="btn-reopen" 
+                                    data-numero="${numeroDoc}" 
+                                    data-mittente="${mittente}"
+                                    title="Riapri anteprima">
+                                🔍 Anteprima
+                            </button>
+                        </td>
                     </tr>
                 `;
             }).join('');
+            
+            // Aggiungi event listener ai pulsanti di riapertura
+            document.querySelectorAll('.btn-reopen').forEach(btn => {
+                btn.addEventListener('click', async function(event) {
+                    event.preventDefault();
+                    const numeroDoc = this.getAttribute('data-numero');
+                    const mittente = this.getAttribute('data-mittente');
+                    await reopenPreview(numeroDoc, mittente, this);
+                });
+            });
         }
 
         function updateStats(rows) {
@@ -214,7 +243,8 @@
                 clearBtn.textContent = '⏳ Cancellazione...';
                 
                 const response = await fetch('/data/clear', {
-                    method: 'POST'
+                    method: 'POST',
+                    credentials: 'include'
                 });
                 
                 const data = await response.json();
@@ -239,14 +269,134 @@
             }
         }
         
+        // Funzione per riaprire l'anteprima di un DDT
+        async function reopenPreview(numeroDocumento, mittente, btnElement) {
+            if (!window.previewModal) {
+                showError('⚠️ Modal di anteprima non disponibile. Ricarica la pagina.');
+                return;
+            }
+            
+            const btn = btnElement || document.querySelector(`.btn-reopen[data-numero="${numeroDocumento}"]`);
+            const originalText = btn ? btn.textContent : '';
+            
+            try {
+                if (btn) {
+                    btn.disabled = true;
+                    btn.textContent = '⏳ Caricamento...';
+                }
+                
+                // Costruisci URL con parametri
+                const url = `/api/ddt/${encodeURIComponent(numeroDocumento)}/reopen${mittente ? '?mittente=' + encodeURIComponent(mittente) : ''}`;
+                
+                const response = await fetch(url, {
+                    credentials: 'include'
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ detail: 'Errore sconosciuto' }));
+                    throw new Error(errorData.detail || `Errore ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                if (!data.success || !data.extracted_data) {
+                    throw new Error('Dati non validi ricevuti dal server');
+                }
+                
+                // Mostra la modal con i dati recuperati
+                window.previewModal.show(
+                    data.extracted_data,
+                    data.pdf_base64,
+                    data.file_hash,
+                    data.file_name
+                );
+                
+            } catch (error) {
+                console.error('Errore riapertura anteprima:', error);
+                showError(`❌ Errore: ${error.message}`);
+                setTimeout(() => hideError(), 5000);
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = originalText;
+                }
+            }
+        }
+        
         // Aggiungi event listener al pulsante
         document.getElementById('clear-all-btn').addEventListener('click', clearAllDDT);
 
-        // Avvia il refresh automatico ogni 3 secondi
-        refreshInterval = setInterval(refreshData, 3000);
+        // Ottimizzazione: usa Intersection Observer per refresh solo quando visibile
+        let isPageVisible = true;
+        document.addEventListener('visibilitychange', () => {
+            isPageVisible = !document.hidden;
+            if (isPageVisible) {
+                // Ricarica immediatamente quando la pagina diventa visibile
+                refreshData();
+            }
+        });
+
+        // Controlla coda watchdog per nuovi PDF
+        let lastProcessedQueueId = null;
+        
+        async function checkWatchdogQueue() {
+            if (!isPageVisible || !window.previewModal) return;
+            
+            // Non controllare se il modal è già aperto
+            const modal = document.getElementById('preview-modal');
+            if (modal && !modal.classList.contains('hidden')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/watchdog-queue', {
+                    credentials: 'include'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.success && data.items && data.items.length > 0) {
+                        // Mostra anteprima solo per elementi nuovi (non già processati)
+                        const item = data.items.find(i => i.id !== lastProcessedQueueId) || data.items[0];
+                        
+                        if (item && item.id !== lastProcessedQueueId) {
+                            lastProcessedQueueId = item.id;
+                            
+                            window.previewModal.show(
+                                item.extracted_data,
+                                item.pdf_base64,
+                                item.file_hash,
+                                item.file_name
+                            );
+                            
+                            // Marca come processato dopo aver mostrato
+                            try {
+                                await fetch(`/api/watchdog-queue/${item.id}/process`, {
+                                    method: 'POST',
+                                    credentials: 'include'
+                                });
+                            } catch (e) {
+                                console.warn('Errore marcatura elemento processato:', e);
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Errore controllo coda watchdog:', error);
+            }
+        }
+
+        // Avvia il refresh automatico ogni 3 secondi (solo se la pagina è visibile)
+        refreshInterval = setInterval(() => {
+            if (isPageVisible) {
+                refreshData();
+                checkWatchdogQueue(); // Controlla anche la coda watchdog
+            }
+        }, 3000);
         
         // Carica immediatamente
         refreshData();
+        checkWatchdogQueue();
         
         // Pulisci l'intervallo quando la pagina viene chiusa
         window.addEventListener('beforeunload', () => {

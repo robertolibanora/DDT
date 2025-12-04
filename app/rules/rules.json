@@ -1,11 +1,12 @@
 {
-  "DEVA": {
-    "detect": ["DEVA", "Armanini", "Società Semplice Agricola"],
-    "instructions": "Il totale non è presente. Calcola somma dei KG delle righe.",
+  "ARMANINI": {
+    "detect": [
+      "Azienda Agricola Troticultura ARMANINI"
+    ],
+    "instructions": "Il totale non è presente: ricalcola riga per riga e somma per il totale.\nSe trovi IDEM nel campo destinatario riporta il contenuto del campo mittente.",
     "overrides": {
-      "totale_kg_mode": "sum_rows",
-      "multipage": true
+      "multipage": true,
+      "totale_kg_mode": "sum_rows"
     }
   }
 }
-

@@ -1,0 +1,698 @@
+{
+  "corrections": {
+    "88e5b018e4501a86ac8da52f4047885f_20251204_101135": {
+      "file_path": "test_file.pdf",
+      "file_name": "test_file.pdf",
+      "file_hash": "88e5b018e4501a86ac8da52f4047885f",
+      "original_data": {
+        "data": "2024-01-01",
+        "mittente": "ACME SRL",
+        "destinatario": "Test Dest",
+        "numero_documento": "DDT-TEST",
+        "totale_kg": 100.0
+      },
+      "corrected_data": {
+        "data": "2024-01-01",
+        "mittente": "ACME S.r.l.",
+        "destinatario": "Test Dest",
+        "numero_documento": "DDT-TEST",
+        "totale_kg": 100.0
+      },
+      "timestamp": "2025-12-04T10:11:35.139790",
+      "fields_changed": [
+        "mittente"
+      ]
+    },
+    "c9f3abcd862db4871721dd2e28595e43_20251204_101135": {
+      "file_path": "test_file2.pdf",
+      "file_name": "test_file2.pdf",
+      "file_hash": "c9f3abcd862db4871721dd2e28595e43",
+      "original_data": {
+        "data": "2024-01-01",
+        "mittente": "ACME SRL",
+        "destinatario": "Test Dest",
+        "numero_documento": "DDT-TEST",
+        "totale_kg": 100.0
+      },
+      "corrected_data": {
+        "data": "2024-01-01",
+        "mittente": "ACME S.r.l.",
+        "destinatario": "Test Dest",
+        "numero_documento": "DDT-TEST",
+        "totale_kg": 100.0
+      },
+      "timestamp": "2025-12-04T10:11:35.140885",
+      "fields_changed": [
+        "mittente"
+      ]
+    },
+    "88e5b018e4501a86ac8da52f4047885f_20251204_101341": {
+      "file_path": "test_file.pdf",
+      "file_name": "test_file.pdf",
+      "file_hash": "88e5b018e4501a86ac8da52f4047885f",
+      "original_data": {
+        "data": "2024-01-01",
+        "mittente": "ACME SRL",
+        "destinatario": "Test Dest",
+        "numero_documento": "DDT-TEST",
+        "totale_kg": 100.0
+      },
+      "corrected_data": {
+        "data": "2024-01-01",
+        "mittente": "ACME S.r.l.",
+        "destinatario": "Test Dest",
+        "numero_documento": "DDT-TEST",
+        "totale_kg": 100.0
+      },
+      "timestamp": "2025-12-04T10:13:41.448698",
+      "fields_changed": [
+        "mittente"
+      ]
+    },
+    "c9f3abcd862db4871721dd2e28595e43_20251204_101341": {
+      "file_path": "test_file2.pdf",
+      "file_name": "test_file2.pdf",
+      "file_hash": "c9f3abcd862db4871721dd2e28595e43",
+      "original_data": {
+        "data": "2024-01-01",
+        "mittente": "ACME SRL",
+        "destinatario": "Test Dest",
+        "numero_documento": "DDT-TEST",
+        "totale_kg": 100.0
+      },
+      "corrected_data": {
+        "data": "2024-01-01",
+        "mittente": "ACME S.r.l.",
+        "destinatario": "Test Dest",
+        "numero_documento": "DDT-TEST",
+        "totale_kg": 100.0
+      },
+      "timestamp": "2025-12-04T10:13:41.478119",
+      "fields_changed": [
+        "mittente"
+      ]
+    },
+    "3ceea129c34dfa01d671f9de879b24a9_20251204_103840": {
+      "file_path": "inbox\\CoPeGo.PDF",
+      "file_name": "CoPeGo.PDF",
+      "file_hash": "3ceea129c34dfa01d671f9de879b24a9",
+      "original_data": {
+        "data": "2023-08-23",
+        "mittente": "Consorzio Pesatori di Goro Soc. Coop.",
+        "destinatario": "GS S.P.A.",
+        "numero_documento": "00009004",
+        "totale_kg": 138
+      },
+      "corrected_data": {
+        "data": "2023-08-23",
+        "mittente": "Consorzio Pesatori di Goro Soc. Coop.",
+        "destinatario": "GS S.P.A.",
+        "numero_documento": "00009004",
+        "totale_kg": 185.0
+      },
+      "timestamp": "2025-12-04T10:38:40.966350",
+      "fields_changed": [
+        "totale_kg"
+      ]
+    },
+    "fd377604677d91d082e833e5636fe53a_20251204_104058": {
+      "file_path": "temp/preview/6212ca0462e4fbdf7376674e2397c71f_ItticaLecchese.pdf",
+      "file_name": "6212ca0462e4fbdf7376674e2397c71f_ItticaLecchese.pdf",
+      "file_hash": "fd377604677d91d082e833e5636fe53a",
+      "original_data": {
+        "data": "2025-08-25",
+        "mittente": "ITTICA LECCHESE S.p.A.",
+        "destinatario": "ALI' SPA",
+        "numero_documento": "DDT-596",
+        "totale_kg": 222
+      },
+      "corrected_data": {
+        "data": "2025-08-25",
+        "mittente": "ITTICA LECCHESE S.p.A.",
+        "destinatario": "ALI' SPA",
+        "numero_documento": "596",
+        "totale_kg": 222.0
+      },
+      "timestamp": "2025-12-04T10:40:58.187660",
+      "fields_changed": [
+        "numero_documento"
+      ]
+    },
+    "417e53a1b863c05f981978dd92c2388a_20251204_104236": {
+      "file_path": "inbox\\1_PDFsam_DDT-N.DelRoma.pdf",
+      "file_name": "1_PDFsam_DDT-N.DelRoma.pdf",
+      "file_hash": "417e53a1b863c05f981978dd92c2388a",
+      "original_data": {
+        "data": "2025-12-01",
+        "mittente": "SEA MASTER S.R.L.",
+        "destinatario": "GS S.P.A. (MILANO)",
+        "numero_documento": "DDT-9221",
+        "totale_kg": 30
+      },
+      "corrected_data": {
+        "data": "2025-12-01",
+        "mittente": "SEA MASTER S.R.L.",
+        "destinatario": "GS S.P.A. (MILANO)",
+        "numero_documento": "9221",
+        "totale_kg": 75.88
+      },
+      "timestamp": "2025-12-04T10:42:36.022376",
+      "fields_changed": [
+        "numero_documento",
+        "totale_kg"
+      ]
+    },
+    "ae4753f1692d25572bb8e80c5110a87f_20251204_104410": {
+      "file_path": "temp/preview/2377acac73f33e2320665589c8999a1e_2_PDFsam_DDT-N.DelRoma.pdf",
+      "file_name": "2377acac73f33e2320665589c8999a1e_2_PDFsam_DDT-N.DelRoma.pdf",
+      "file_hash": "ae4753f1692d25572bb8e80c5110a87f",
+      "original_data": {
+        "data": "2025-12-01",
+        "mittente": "SEA MASTER S.R.L.",
+        "destinatario": "GS S.P.A. (TORINO)",
+        "numero_documento": "DDT-9222",
+        "totale_kg": 30
+      },
+      "corrected_data": {
+        "data": "2025-12-01",
+        "mittente": "SEA MASTER S.R.L.",
+        "destinatario": "GS S.P.A. (TORINO)",
+        "numero_documento": "9222",
+        "totale_kg": 80.34
+      },
+      "timestamp": "2025-12-04T10:44:10.690538",
+      "fields_changed": [
+        "numero_documento",
+        "totale_kg"
+      ]
+    },
+    "74e7a1cdedec2d03d836999e5b840673_20251204_104906": {
+      "file_path": "temp/preview/0c9032540c4d9ed65fac06e1d7dcfba1_4_PDFsam_DDT-N.DelRoma.pdf",
+      "file_name": "0c9032540c4d9ed65fac06e1d7dcfba1_4_PDFsam_DDT-N.DelRoma.pdf",
+      "file_hash": "74e7a1cdedec2d03d836999e5b840673",
+      "original_data": {
+        "data": "2025-12-01",
+        "mittente": "SEA MASTER S.R.L.",
+        "destinatario": "SARTO S.r.l.",
+        "numero_documento": "DDT-9226",
+        "totale_kg": 33.17
+      },
+      "corrected_data": {
+        "data": "2025-12-01",
+        "mittente": "SEA MASTER S.R.L.",
+        "destinatario": "SARTO S.r.l.",
+        "numero_documento": "DDT-9226",
+        "totale_kg": 33.17
+      },
+      "timestamp": "2025-12-04T10:49:06.651783",
+      "fields_changed": []
+    },
+    "08b58df42398485892b50bb0edbad2d4_20251204_110504": {
+      "file_path": "inbox\\GregoPesca.pdf",
+      "file_name": "GregoPesca.pdf",
+      "file_hash": "08b58df42398485892b50bb0edbad2d4",
+      "original_data": {
+        "data": "2025-08-25",
+        "mittente": "Grego Pesca S.r.l.",
+        "destinatario": "LA GE GE PESCA S.r.l.",
+        "numero_documento": "2131",
+        "totale_kg": 18
+      },
+      "corrected_data": {
+        "data": "2025-08-25",
+        "mittente": "Grego Pesca S.r.l.",
+        "destinatario": "LA GE GE PESCA S.r.l.",
+        "numero_documento": "2131",
+        "totale_kg": 18.0
+      },
+      "timestamp": "2025-12-04T11:05:04.988675",
+      "fields_changed": []
+    },
+    "74e7a1cdedec2d03d836999e5b840673_20251204_110815": {
+      "file_path": "temp/preview/0c9032540c4d9ed65fac06e1d7dcfba1_4_PDFsam_DDT-N.DelRoma.pdf",
+      "file_name": "0c9032540c4d9ed65fac06e1d7dcfba1_4_PDFsam_DDT-N.DelRoma.pdf",
+      "file_hash": "74e7a1cdedec2d03d836999e5b840673",
+      "original_data": {
+        "data": "2025-12-01",
+        "mittente": "SEA MASTER S.R.L.",
+        "destinatario": "SARTO S.r.l.",
+        "numero_documento": "DDT-9226",
+        "totale_kg": 33.17
+      },
+      "corrected_data": {
+        "data": "2025-12-01",
+        "mittente": "SEA MASTER S.R.L.",
+        "destinatario": "SARTO S.r.l.",
+        "numero_documento": "9226",
+        "totale_kg": 33.17
+      },
+      "timestamp": "2025-12-04T11:08:15.192988",
+      "fields_changed": [
+        "numero_documento"
+      ]
+    },
+    "d440503a0b18aef2d4ff62b3e1664b76_20251204_110933": {
+      "file_path": "inbox\\GoroPesca.pdf",
+      "file_name": "GoroPesca.pdf",
+      "file_hash": "d440503a0b18aef2d4ff62b3e1664b76",
+      "original_data": {
+        "data": "2025-05-13",
+        "mittente": "GORO PESCA S.r.l.",
+        "destinatario": "MARR S.p.A.",
+        "numero_documento": "DDT-5122",
+        "totale_kg": 280
+      },
+      "corrected_data": {
+        "data": "2025-05-13",
+        "mittente": "GORO PESCA S.r.l.",
+        "destinatario": "MARR S.p.A.",
+        "numero_documento": "5122",
+        "totale_kg": 280.0
+      },
+      "timestamp": "2025-12-04T11:09:33.974059",
+      "fields_changed": [
+        "numero_documento"
+      ]
+    },
+    "c1e1f1751e555cd6533baa8a1e73b4eb_20251204_114216": {
+      "file_path": "temp/preview/4052caa05e25c9350facc650234f63a0_AVRAMAR 30755-25-2.pdf",
+      "file_name": "4052caa05e25c9350facc650234f63a0_AVRAMAR 30755-25-2.pdf",
+      "file_hash": "c1e1f1751e555cd6533baa8a1e73b4eb",
+      "original_data": {
+        "data": "2025-11-17",
+        "mittente": "AVRAMAR COMMERCIAL AND LOGISTICS SA",
+        "destinatario": "SARTO SRL",
+        "numero_documento": "3350003075",
+        "totale_kg": 4218
+      },
+      "corrected_data": {
+        "data": "2025-11-17",
+        "mittente": "AVRAMAR COMMERCIAL AND LOGISTICS SA",
+        "destinatario": "SARTO SRL",
+        "numero_documento": "3350003075",
+        "totale_kg": 2211.38
+      },
+      "timestamp": "2025-12-04T11:42:16.145083",
+      "fields_changed": [
+        "totale_kg"
+      ]
+    },
+    "fd377604677d91d082e833e5636fe53a_20251204_114639": {
+      "file_path": "temp/preview/6212ca0462e4fbdf7376674e2397c71f_ItticaLecchese.pdf",
+      "file_name": "6212ca0462e4fbdf7376674e2397c71f_ItticaLecchese.pdf",
+      "file_hash": "fd377604677d91d082e833e5636fe53a",
+      "original_data": {
+        "data": "2025-08-25",
+        "mittente": "ITTICA LECCHESE S.p.A.",
+        "destinatario": "ALI' SPA",
+        "numero_documento": "596",
+        "totale_kg": 222
+      },
+      "corrected_data": {
+        "data": "2025-08-25",
+        "mittente": "ITTICA LECCHESE S.p.A.",
+        "destinatario": "ALI' SPA",
+        "numero_documento": "596",
+        "totale_kg": 222.0
+      },
+      "timestamp": "2025-12-04T11:46:39.940799",
+      "fields_changed": []
+    },
+    "08b58df42398485892b50bb0edbad2d4_20251204_114900": {
+      "file_path": "inbox\\GregoPesca.pdf",
+      "file_name": "GregoPesca.pdf",
+      "file_hash": "08b58df42398485892b50bb0edbad2d4",
+      "original_data": {
+        "data": "2025-08-25",
+        "mittente": "Grego Pesca S.r.l.",
+        "destinatario": "LA GE GE PESCA S.r.l.",
+        "numero_documento": "2131",
+        "totale_kg": 18
+      },
+      "corrected_data": {
+        "data": "2025-08-25",
+        "mittente": "Grego Pesca S.r.l.",
+        "destinatario": "LA GE GE PESCA S.r.l.",
+        "numero_documento": "2131",
+        "totale_kg": 18.0
+      },
+      "timestamp": "2025-12-04T11:49:00.575046",
+      "fields_changed": []
+    },
+    "88223ce2cb21be721a3b2830e932c219_20251204_115214": {
+      "file_path": "temp/preview/c1856cd737fb2a75881ee8e6b8f7be62_Waterhouse.pdf",
+      "file_name": "c1856cd737fb2a75881ee8e6b8f7be62_Waterhouse.pdf",
+      "file_hash": "88223ce2cb21be721a3b2830e932c219",
+      "original_data": {
+        "data": "2025-08-21",
+        "mittente": "WATERHOUSE S.P.A.",
+        "destinatario": "CONAD CENTRO NORD SOC.COOPERATIVA (FRESCO)",
+        "numero_documento": "250116645 del 21/08/2025",
+        "totale_kg": 12
+      },
+      "corrected_data": {
+        "data": "2025-08-21",
+        "mittente": "WATERHOUSE S.P.A.",
+        "destinatario": "CONAD CENTRO NORD SOC.COOPERATIVA (FRESCO)",
+        "numero_documento": "250116645",
+        "totale_kg": 12.7
+      },
+      "timestamp": "2025-12-04T11:52:14.208910",
+      "fields_changed": [
+        "numero_documento",
+        "totale_kg"
+      ]
+    },
+    "ee015ed2003bd4302292236300d05999_20251204_115347": {
+      "file_path": "temp/preview/30fdbcc0afb3d371294085468c3a9399_LaSelva.pdf",
+      "file_name": "30fdbcc0afb3d371294085468c3a9399_LaSelva.pdf",
+      "file_hash": "ee015ed2003bd4302292236300d05999",
+      "original_data": {
+        "data": "2025-08-25",
+        "mittente": "LA SELVA PESCA S.r.l.",
+        "destinatario": "Vitale Nunzia S.r.l.",
+        "numero_documento": "253024180",
+        "totale_kg": 252.02
+      },
+      "corrected_data": {
+        "data": "2025-08-25",
+        "mittente": "LA SELVA PESCA S.r.l.",
+        "destinatario": "Vitale Nunzia S.r.l.",
+        "numero_documento": "253024180",
+        "totale_kg": 252.02
+      },
+      "timestamp": "2025-12-04T11:53:47.930923",
+      "fields_changed": []
+    },
+    "de67052408b67101ad14978d7ffcea5f_20251204_115953": {
+      "file_path": "inbox\\6916_LACQUAVIVA_S.r.l._20251204_115938.pdf",
+      "file_name": "6916_LACQUAVIVA_S.r.l._20251204_115938.pdf",
+      "file_hash": "de67052408b67101ad14978d7ffcea5f",
+      "original_data": {
+        "data": "2025-08-25",
+        "mittente": "L'ACQUAVIVA S.r.l.",
+        "destinatario": "MARR SPA",
+        "numero_documento": "6916",
+        "totale_kg": 205
+      },
+      "corrected_data": {
+        "data": "2025-08-25",
+        "mittente": "L'ACQUAVIVA S.r.l.",
+        "destinatario": "MARR SPA",
+        "numero_documento": "6916",
+        "totale_kg": 205.0
+      },
+      "timestamp": "2025-12-04T11:59:53.665577",
+      "fields_changed": []
+    },
+    "de67052408b67101ad14978d7ffcea5f_20251204_120001": {
+      "file_path": "inbox\\6916_LACQUAVIVA_S.r.l._20251204_115938.pdf",
+      "file_name": "6916_LACQUAVIVA_S.r.l._20251204_115938.pdf",
+      "file_hash": "de67052408b67101ad14978d7ffcea5f",
+      "original_data": {
+        "data": "2025-08-25",
+        "mittente": "L'ACQUAVIVA S.r.l.",
+        "destinatario": "MARR SPA",
+        "numero_documento": "6916",
+        "totale_kg": 205
+      },
+      "corrected_data": {
+        "data": "2025-08-25",
+        "mittente": "L'ACQUAVIVA S.r.l.",
+        "destinatario": "MARR SPA",
+        "numero_documento": "6916",
+        "totale_kg": 205.0
+      },
+      "timestamp": "2025-12-04T12:00:01.777441",
+      "fields_changed": []
+    },
+    "de67052408b67101ad14978d7ffcea5f_20251204_120005": {
+      "file_path": "inbox\\6916_LACQUAVIVA_S.r.l._20251204_115938.pdf",
+      "file_name": "6916_LACQUAVIVA_S.r.l._20251204_115938.pdf",
+      "file_hash": "de67052408b67101ad14978d7ffcea5f",
+      "original_data": {
+        "data": "2025-08-25",
+        "mittente": "L'ACQUAVIVA S.r.l.",
+        "destinatario": "MARR SPA",
+        "numero_documento": "6916",
+        "totale_kg": 205
+      },
+      "corrected_data": {
+        "data": "2025-08-25",
+        "mittente": "L'ACQUAVIVA S.r.l.",
+        "destinatario": "MARR SPA",
+        "numero_documento": "6916",
+        "totale_kg": 205.0
+      },
+      "timestamp": "2025-12-04T12:00:05.585864",
+      "fields_changed": []
+    },
+    "de67052408b67101ad14978d7ffcea5f_20251204_120121": {
+      "file_path": "inbox\\6916_LACQUAVIVA_S.r.l._20251204_115938.pdf",
+      "file_name": "6916_LACQUAVIVA_S.r.l._20251204_115938.pdf",
+      "file_hash": "de67052408b67101ad14978d7ffcea5f",
+      "original_data": {
+        "data": "2025-08-25",
+        "mittente": "L'ACQUAVIVA S.r.l.",
+        "destinatario": "MARR SPA",
+        "numero_documento": "160",
+        "totale_kg": 205
+      },
+      "corrected_data": {
+        "data": "2025-08-25",
+        "mittente": "L'ACQUAVIVA S.r.l.",
+        "destinatario": "MARR SPA",
+        "numero_documento": "160",
+        "totale_kg": 205.0
+      },
+      "timestamp": "2025-12-04T12:01:21.540660",
+      "fields_changed": []
+    },
+    "05275c07a4dd9d5a072cf2865eacf8b1_20251204_120455": {
+      "file_path": "inbox\\5072_BONAPESCA_S.r.l._20251204_120432.pdf",
+      "file_name": "5072_BONAPESCA_S.r.l._20251204_120432.pdf",
+      "file_hash": "05275c07a4dd9d5a072cf2865eacf8b1",
+      "original_data": {
+        "data": "2025-06-06",
+        "mittente": "BONAPESCA S.r.l.",
+        "destinatario": "MARR S.p.a. FILIALE SANREMO",
+        "numero_documento": "5072",
+        "totale_kg": 108
+      },
+      "corrected_data": {
+        "data": "2025-06-06",
+        "mittente": "BONAPESCA S.r.l.",
+        "destinatario": "MARR S.p.a. FILIALE SANREMO",
+        "numero_documento": "5072/A",
+        "totale_kg": 108.0
+      },
+      "timestamp": "2025-12-04T12:04:55.111818",
+      "fields_changed": [
+        "numero_documento"
+      ]
+    },
+    "05275c07a4dd9d5a072cf2865eacf8b1_20251204_120503": {
+      "file_path": "inbox\\5072_BONAPESCA_S.r.l._20251204_120432.pdf",
+      "file_name": "5072_BONAPESCA_S.r.l._20251204_120432.pdf",
+      "file_hash": "05275c07a4dd9d5a072cf2865eacf8b1",
+      "original_data": {
+        "data": "2025-06-06",
+        "mittente": "BONAPESCA S.r.l.",
+        "destinatario": "MARR S.p.a. FILIALE SANREMO",
+        "numero_documento": "5072",
+        "totale_kg": 108
+      },
+      "corrected_data": {
+        "data": "2025-06-06",
+        "mittente": "BONAPESCA S.r.l.",
+        "destinatario": "MARR S.p.a. FILIALE SANREMO",
+        "numero_documento": "5072",
+        "totale_kg": 108.0
+      },
+      "timestamp": "2025-12-04T12:05:03.447619",
+      "fields_changed": []
+    },
+    "05275c07a4dd9d5a072cf2865eacf8b1_20251204_120604": {
+      "file_path": "inbox\\5072_BONAPESCA_S.r.l._20251204_120432.pdf",
+      "file_name": "5072_BONAPESCA_S.r.l._20251204_120432.pdf",
+      "file_hash": "05275c07a4dd9d5a072cf2865eacf8b1",
+      "original_data": {
+        "data": "2025-06-06",
+        "mittente": "BONAPESCA S.r.l.",
+        "destinatario": "MARR S.p.a. FILIALE SANREMO",
+        "numero_documento": "5072",
+        "totale_kg": 108
+      },
+      "corrected_data": {
+        "data": "2025-06-06",
+        "mittente": "BONAPESCA S.r.l.",
+        "destinatario": "MARR S.p.a. FILIALE SANREMO",
+        "numero_documento": "5072/A",
+        "totale_kg": 108.0
+      },
+      "timestamp": "2025-12-04T12:06:04.702981",
+      "fields_changed": [
+        "numero_documento"
+      ]
+    },
+    "5daeaafd259ef7d1d40def1b65acce4f_20251204_122841": {
+      "file_path": "inbox\\8143_ITTICA_GESIA_SRL_20251204_122822.pdf",
+      "file_name": "8143_ITTICA_GESIA_SRL_20251204_122822.pdf",
+      "file_hash": "5daeaafd259ef7d1d40def1b65acce4f",
+      "original_data": {
+        "data": "2025-08-22",
+        "mittente": "ITTICA GESIA SRL",
+        "destinatario": "ANTONIO VERRINI S.R.L.",
+        "numero_documento": "8143",
+        "totale_kg": 20
+      },
+      "corrected_data": {
+        "data": "2025-08-22",
+        "mittente": "ITTICA GESIA SRL",
+        "destinatario": "ANTONIO VERRINI S.R.L.",
+        "numero_documento": "8143",
+        "totale_kg": 20.0
+      },
+      "timestamp": "2025-12-04T12:28:41.076050",
+      "fields_changed": []
+    },
+    "5daeaafd259ef7d1d40def1b65acce4f_20251204_122922": {
+      "file_path": "inbox\\8143_ITTICA_GESIA_SRL_20251204_122822.pdf",
+      "file_name": "8143_ITTICA_GESIA_SRL_20251204_122822.pdf",
+      "file_hash": "5daeaafd259ef7d1d40def1b65acce4f",
+      "original_data": {
+        "data": "2025-08-22",
+        "mittente": "ITTICA GESIA SRL",
+        "destinatario": "ANTONIO VERRINI S.R.L.",
+        "numero_documento": "8143",
+        "totale_kg": 20
+      },
+      "corrected_data": {
+        "data": "2025-08-22",
+        "mittente": "ITTICA GESIA SRL",
+        "destinatario": "ANTONIO VERRINI S.R.L.",
+        "numero_documento": "8143",
+        "totale_kg": 20.0
+      },
+      "timestamp": "2025-12-04T12:29:22.645970",
+      "fields_changed": []
+    },
+    "5daeaafd259ef7d1d40def1b65acce4f_20251204_122957": {
+      "file_path": "inbox\\8143_ITTICA_GESIA_SRL_20251204_122822.pdf",
+      "file_name": "8143_ITTICA_GESIA_SRL_20251204_122822.pdf",
+      "file_hash": "5daeaafd259ef7d1d40def1b65acce4f",
+      "original_data": {
+        "data": "2025-08-22",
+        "mittente": "ITTICA GESIA SRL",
+        "destinatario": "ANTONIO VERRINI S.R.L.",
+        "numero_documento": "8143",
+        "totale_kg": "20"
+      },
+      "corrected_data": {
+        "data": "2025-08-22",
+        "mittente": "ITTICA GESIA SRL",
+        "destinatario": "ANTONIO VERRINI S.R.L.",
+        "numero_documento": "8142",
+        "totale_kg": 20.0
+      },
+      "timestamp": "2025-12-04T12:29:57.846550",
+      "fields_changed": [
+        "numero_documento",
+        "totale_kg"
+      ]
+    }
+  },
+  "learning_patterns": {
+    "mittente_acme srl": {
+      "field": "mittente",
+      "original_pattern": "acme srl",
+      "corrected_value": "ACME S.r.l.",
+      "count": 4,
+      "files": [
+        "88e5b018e4501a86ac8da52f4047885f",
+        "c9f3abcd862db4871721dd2e28595e43"
+      ]
+    },
+    "numero_documento_ddt-596": {
+      "field": "numero_documento",
+      "original_pattern": "ddt-596",
+      "corrected_value": "596",
+      "count": 1,
+      "files": [
+        "fd377604677d91d082e833e5636fe53a"
+      ],
+      "mittente_pattern": "ITTICA LECCHESE S.p.A."
+    },
+    "numero_documento_ddt-9221": {
+      "field": "numero_documento",
+      "original_pattern": "ddt-9221",
+      "corrected_value": "9221",
+      "count": 1,
+      "files": [
+        "417e53a1b863c05f981978dd92c2388a"
+      ],
+      "mittente_pattern": "SEA MASTER S.R.L."
+    },
+    "numero_documento_ddt-9222": {
+      "field": "numero_documento",
+      "original_pattern": "ddt-9222",
+      "corrected_value": "9222",
+      "count": 1,
+      "files": [
+        "ae4753f1692d25572bb8e80c5110a87f"
+      ],
+      "mittente_pattern": "SEA MASTER S.R.L."
+    },
+    "numero_documento_ddt-9226": {
+      "field": "numero_documento",
+      "original_pattern": "ddt-9226",
+      "corrected_value": "9226",
+      "count": 1,
+      "files": [
+        "74e7a1cdedec2d03d836999e5b840673"
+      ],
+      "mittente_pattern": "SEA MASTER S.R.L."
+    },
+    "numero_documento_ddt-5122": {
+      "field": "numero_documento",
+      "original_pattern": "ddt-5122",
+      "corrected_value": "5122",
+      "count": 1,
+      "files": [
+        "d440503a0b18aef2d4ff62b3e1664b76"
+      ],
+      "mittente_pattern": "GORO PESCA S.r.l."
+    },
+    "numero_documento_250116645 del 21/08/2025": {
+      "field": "numero_documento",
+      "original_pattern": "250116645 del 21/08/2025",
+      "corrected_value": "250116645",
+      "count": 1,
+      "files": [
+        "88223ce2cb21be721a3b2830e932c219"
+      ],
+      "mittente_pattern": "WATERHOUSE S.P.A."
+    },
+    "numero_documento_5072": {
+      "field": "numero_documento",
+      "original_pattern": "5072",
+      "corrected_value": "5072/A",
+      "count": 2,
+      "files": [
+        "05275c07a4dd9d5a072cf2865eacf8b1"
+      ],
+      "mittente_pattern": "BONAPESCA S.r.l."
+    },
+    "numero_documento_8143": {
+      "field": "numero_documento",
+      "original_pattern": "8143",
+      "corrected_value": "8142",
+      "count": 1,
+      "files": [
+        "5daeaafd259ef7d1d40def1b65acce4f"
+      ],
+      "mittente_pattern": "ITTICA GESIA SRL"
+    }
+  },
+  "auto_rules_created": []
+}

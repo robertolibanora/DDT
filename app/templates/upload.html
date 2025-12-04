@@ -36,7 +36,7 @@
             </div>
 
             <button type="submit" class="btn btn-primary" id="submit-btn">
-                <span id="btn-text">🚀 Carica e Processa</span>
+                <span id="btn-text">🔍 Estrai e Anteprima</span>
                 <span id="btn-spinner" class="spinner hidden"></span>
             </button>
     </form>
@@ -45,10 +45,11 @@
     <div class="card">
         <h2>ℹ️ Informazioni</h2>
         <ul class="info-list">
-            <li>✅ Il sistema estrae automaticamente i dati dal DDT</li>
-            <li>✅ I dati vengono salvati in Excel e visualizzati nella dashboard</li>
+            <li>✅ Il sistema estrae automaticamente i dati dal DDT usando AI</li>
+            <li>✅ Dopo l'estrazione, apparirà un'anteprima per verificare e correggere i dati</li>
+            <li>✅ Conferma l'anteprima per salvare i dati in Excel</li>
             <li>✅ Puoi anche copiare PDF nella cartella <code>inbox/</code> per elaborazione automatica</li>
-            <li>✅ Tutti i campi vengono validati e normalizzati</li>
+            <li>✅ Il sistema impara dalle tue correzioni per migliorare l'estrazione futura</li>
         </ul>
     </div>
 {% endblock %}
@@ -118,6 +119,30 @@
             hideMessage();
         });
 
+        // Assicurati che il modal sia inizializzato
+        function ensureModalReady() {
+            return new Promise((resolve) => {
+                if (window.previewModal && window.previewModal.modal) {
+                    resolve();
+                    return;
+                }
+                
+                // Attendi che il modal sia caricato (max 2 secondi)
+                let attempts = 0;
+                const checkInterval = setInterval(() => {
+                    attempts++;
+                    if (window.previewModal && window.previewModal.modal) {
+                        clearInterval(checkInterval);
+                        resolve();
+                    } else if (attempts > 20) {
+                        clearInterval(checkInterval);
+                        console.error('Modal non disponibile dopo 2 secondi');
+                        resolve(); // Risolvi comunque per non bloccare
+                    }
+                }, 100);
+            });
+        }
+
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             
@@ -139,33 +164,91 @@
             try {
                 const response = await fetch('/upload', {
                     method: 'POST',
-                    body: formData
+                    body: formData,
+                    credentials: 'include'
                 });
 
-                const data = await response.json();
+                console.log('Response status:', response.status);
+                console.log('Response headers:', response.headers.get('content-type'));
+                
+                const contentType = response.headers.get('content-type') || '';
+                let data;
+                
+                if (contentType.includes('application/json')) {
+                    data = await response.json();
+                } else {
+                    const text = await response.text();
+                    console.error('Risposta non JSON:', text.substring(0, 200));
+                    throw new Error('Risposta del server non valida');
+                }
+
+                console.log('Dati ricevuti:', {
+                    success: data.success,
+                    has_extracted_data: !!data.extracted_data,
+                    has_pdf_base64: !!data.pdf_base64,
+                    pdf_base64_length: data.pdf_base64 ? data.pdf_base64.length : 0,
+                    file_hash: data.file_hash,
+                    file_name: data.file_name
+                });
 
                 if (!response.ok) {
                     throw new Error(data.detail || 'Errore durante il caricamento');
                 }
 
-                showMessage('✅ DDT caricato e processato con successo!', 'success');
-                
-                // Reset form dopo 2 secondi
-                setTimeout(() => {
-                    form.reset();
-                    fileInfo.classList.add('hidden');
-                    // Redirect alla dashboard (homepage) dopo 3 secondi
-                    setTimeout(() => {
-                        window.location.href = '/';
-                    }, 3000);
-                }, 2000);
+                // Mostra anteprima - il salvataggio avviene solo dopo conferma nel modal
+                if (data.success) {
+                    console.log('Dati validi, verifico modal...');
+                    console.log('window.previewModal:', window.previewModal);
+                    
+                    // Assicurati che il modal sia pronto
+                    await ensureModalReady();
+                    
+                    console.log('Dopo ensureModalReady, window.previewModal:', window.previewModal);
+                    
+                    // Verifica che il modal sia disponibile
+                    if (window.previewModal && typeof window.previewModal.show === 'function') {
+                        console.log('Chiamo previewModal.show con:', {
+                            extracted_data: data.extracted_data,
+                            pdf_base64_length: data.pdf_base64 ? data.pdf_base64.length : 0,
+                            file_hash: data.file_hash,
+                            file_name: data.file_name
+                        });
+                        
+                        try {
+                            window.previewModal.show(
+                                data.extracted_data,
+                                data.pdf_base64,
+                                data.file_hash,
+                                data.file_name
+                            );
+                            console.log('Modal.show chiamato con successo');
+                            
+                            // Reset form dopo aver mostrato il modal
+                            form.reset();
+                            fileInfo.classList.add('hidden');
+                        } catch (modalError) {
+                            console.error('Errore durante show modal:', modalError);
+                            showMessage('⚠️ Errore durante la visualizzazione dell\'anteprima: ' + modalError.message, 'error');
+                        }
+                    } else {
+                        console.error('previewModal non disponibile o show non è una funzione:', {
+                            previewModal: window.previewModal,
+                            hasShow: window.previewModal ? typeof window.previewModal.show : 'N/A'
+                        });
+                        showMessage('⚠️ Errore: modal di anteprima non disponibile. Ricarica la pagina.', 'error');
+                    }
+                } else {
+                    console.error('data.success è false:', data);
+                    showMessage('⚠️ Errore: impossibile mostrare l\'anteprima', 'error');
+                }
 
             } catch (error) {
                 console.error('Errore upload:', error);
+                console.error('Stack:', error.stack);
                 showMessage(`❌ Errore: ${error.message}`, 'error');
             } finally {
                 submitBtn.disabled = false;
-                btnText.textContent = '🚀 Carica e Processa';
+                btnText.textContent = '🔍 Estrai e Anteprima';
                 btnSpinner.classList.add('hidden');
             }
         });

@@ -2,7 +2,7 @@
 Router FastAPI per gestione regole dinamiche
 """
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends, Request
 from typing import Dict, Any, List
 from pydantic import BaseModel
 
@@ -14,6 +14,7 @@ from app.rules.rules import (
     reload_rules
 )
 from app.models import RuleData
+from app.dependencies import require_authentication
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ router = APIRouter(prefix="/api/rules", tags=["rules"])
 class RuleResponse(BaseModel):
     """Risposta con tutte le regole"""
     rules: Dict[str, Any]
+    auto_rules: List[str] = []
 
 
 class RuleCreateRequest(BaseModel):
@@ -38,20 +40,30 @@ class RuleDeleteResponse(BaseModel):
 
 
 @router.get("", response_model=RuleResponse)
-async def list_rules():
+async def list_rules(request: Request, auth: bool = Depends(require_authentication)):
     """
-    Ottiene tutte le regole disponibili
+    Ottiene tutte le regole disponibili (incluse quelle create automaticamente)
     """
     try:
+        from app.corrections import get_auto_rules_created
         rules = get_all_rules()
-        return {"rules": rules}
+        auto_rules = get_auto_rules_created()
+        
+        # Aggiungi flag per indicare quali sono automatiche
+        rules_with_meta = {}
+        for rule_name, rule_data in rules.items():
+            rule_with_meta = rule_data.copy()
+            rule_with_meta["is_auto"] = rule_name in auto_rules
+            rules_with_meta[rule_name] = rule_with_meta
+        
+        return {"rules": rules_with_meta, "auto_rules": auto_rules}
     except Exception as e:
         logger.error(f"Errore lettura regole: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Errore durante la lettura delle regole: {str(e)}")
 
 
 @router.get("/{name}")
-async def get_rule_by_name(name: str):
+async def get_rule_by_name(name: str, request: Request, auth: bool = Depends(require_authentication)):
     """
     Ottiene una regola specifica per nome
     """
@@ -68,24 +80,24 @@ async def get_rule_by_name(name: str):
 
 
 @router.post("/add")
-async def create_or_update_rule(request: RuleCreateRequest):
+async def create_or_update_rule(request_data: RuleCreateRequest, request: Request, auth: bool = Depends(require_authentication)):
     """
     Crea o aggiorna una regola
     """
     try:
         # Valida i dati usando Pydantic
-        rule_dict = request.rule.model_dump()
+        rule_dict = request_data.rule.model_dump()
         
         # Salva la regola
-        add_rule(request.name, rule_dict)
+        add_rule(request_data.name, rule_dict)
         
         # Ricarica le regole per applicarle immediatamente
         reload_rules()
         
-        logger.info(f"Regola '{request.name}' creata/aggiornata con successo")
+        logger.info(f"Regola '{request_data.name}' creata/aggiornata con successo")
         return {
             "success": True,
-            "message": f"Regola '{request.name}' salvata con successo",
+            "message": f"Regola '{request_data.name}' salvata con successo",
             "rule": rule_dict
         }
     except Exception as e:
@@ -94,7 +106,7 @@ async def create_or_update_rule(request: RuleCreateRequest):
 
 
 @router.put("/{name}")
-async def update_rule(name: str, rule: RuleData):
+async def update_rule(name: str, rule: RuleData, request: Request, auth: bool = Depends(require_authentication)):
     """
     Aggiorna una regola esistente
     """
@@ -125,7 +137,7 @@ async def update_rule(name: str, rule: RuleData):
 
 
 @router.delete("/{name}", response_model=RuleDeleteResponse)
-async def remove_rule(name: str):
+async def remove_rule(name: str, request: Request, auth: bool = Depends(require_authentication)):
     """
     Elimina una regola
     """
@@ -149,7 +161,7 @@ async def remove_rule(name: str):
 
 
 @router.post("/reload")
-async def reload_rules_endpoint():
+async def reload_rules_endpoint(request: Request, auth: bool = Depends(require_authentication)):
     """
     Ricarica le regole dal file (utile dopo modifiche manuali)
     """

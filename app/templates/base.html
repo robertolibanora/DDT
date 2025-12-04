@@ -5,38 +5,43 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}DDT Processor{% endblock %} - Tema Mare</title>
     <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="stylesheet" href="/static/css/preview_modal.css">
     {% block extra_css %}{% endblock %}
 </head>
 <body>
+    <a href="#main-content" class="skip-link">Salta al contenuto principale</a>
     <header>
         <h1>{% block header_title %}📦 DDT Processor{% endblock %}</h1>
-        <nav>
-            <a href="/" id="nav-dashboard">📊 Dashboard</a>
-            <a href="/upload" id="nav-upload">📤 Carica</a>
-            <a href="/rules" id="nav-rules">⚙️ Regole</a>
+        <nav aria-label="Navigazione principale">
+            <a href="/dashboard" id="nav-dashboard" aria-label="Vai alla dashboard">📊 Dashboard</a>
+            <a href="/upload" id="nav-upload" aria-label="Carica un nuovo DDT">📤 Carica</a>
+            <a href="/rules" id="nav-rules" aria-label="Gestisci le regole">⚙️ Regole</a>
+            <a href="/logout" id="nav-logout" style="margin-left: auto;" aria-label="Esci dal sistema">🚪 Logout</a>
         </nav>
         {% block header_extra %}{% endblock %}
     </header>
 
     {% block messages %}{% endblock %}
 
-    {% block content %}{% endblock %}
+    <main id="main-content">
+        {% block content %}{% endblock %}
+    </main>
 
     <footer>
         <p>DDT Processor - Sistema di gestione Documenti di Trasporto</p>
     </footer>
 
     {% block scripts %}{% endblock %}
+    <script src="/static/js/preview_modal.js"></script>
     <script>
         // Evidenzia il link di navigazione attivo
         (function() {
             const path = window.location.pathname;
             const navUpload = document.getElementById('nav-upload');
             const navDashboard = document.getElementById('nav-dashboard');
-            
             const navRules = document.getElementById('nav-rules');
             
-            if (path === '/' || path === '/dashboard') {
+            if (path === '/dashboard') {
                 if (navDashboard) navDashboard.classList.add('active');
             } else if (path === '/upload') {
                 if (navUpload) navUpload.classList.add('active');

@@ -4,13 +4,14 @@ Router FastAPI per reprocessing DDT
 import os
 import logging
 from pathlib import Path
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends, Request, Body, Body
 from typing import Dict, Any, Optional
 from pydantic import BaseModel
 
 from app.extract import extract_from_pdf
 from app.excel import read_excel_as_dict, append_to_excel
 from app.config import INBOX_DIR
+from app.dependencies import require_authentication
 
 logger = logging.getLogger(__name__)
 
@@ -31,21 +32,21 @@ class ReprocessResponse(BaseModel):
 
 
 @router.post("/{numero_documento}")
-async def reprocess_ddt(numero_documento: str, request: ReprocessRequest = None):
+async def reprocess_ddt(numero_documento: str, http_request: Request, request_data: Optional[ReprocessRequest] = Body(None), auth: bool = Depends(require_authentication)):
     """
     Riprocessa un DDT specifico usando le regole aggiornate
     
     Args:
         numero_documento: Numero del documento da riprocessare
-        request: Opzionale, può contenere file_path personalizzato
+        request_data: Opzionale, può contenere file_path personalizzato
     """
     try:
         # Cerca il file PDF
         pdf_path = None
         
         # Se è fornito un percorso personalizzato nel body della richiesta
-        if request and hasattr(request, 'file_path') and request.file_path and os.path.exists(request.file_path):
-            pdf_path = request.file_path
+        if request_data and hasattr(request_data, 'file_path') and request_data.file_path and os.path.exists(request_data.file_path):
+            pdf_path = request_data.file_path
         else:
             # Cerca nella cartella inbox
             inbox_path = Path(INBOX_DIR)
@@ -110,14 +111,14 @@ async def reprocess_ddt(numero_documento: str, request: ReprocessRequest = None)
 
 
 @router.post("/by-file")
-async def reprocess_by_file(request: Dict[str, Any]):
+async def reprocess_by_file(http_request: Request, request_data: Dict[str, Any], auth: bool = Depends(require_authentication)):
     """
     Riprocessa un DDT fornendo direttamente il percorso del file PDF
     
     Args:
-        request: Dizionario con chiave 'file_path' contenente il percorso del file PDF
+        request_data: Dizionario con chiave 'file_path' contenente il percorso del file PDF
     """
-    file_path = request.get('file_path')
+    file_path = request_data.get('file_path')
     if not file_path:
         raise HTTPException(status_code=400, detail="Parametro 'file_path' mancante")
     

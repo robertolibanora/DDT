@@ -5,14 +5,24 @@ Supporto per regole dinamiche e estrazione testo
 """
 import base64
 import logging
+import sys
+import os
 from typing import Dict, Any, Optional
 from openai import OpenAI, OpenAIError
 from openai.types.chat import ChatCompletion
+
+# Gestione path quando eseguito come script diretto
+if __name__ == "__main__":
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir = os.path.dirname(script_dir)
+    if root_dir not in sys.path:
+        sys.path.insert(0, root_dir)
 
 from app.config import OPENAI_API_KEY, MODEL
 from app.models import DDTData
 from app.utils import normalize_date, normalize_float, normalize_text, clean_company_name
 from app.rules.rules import detect_rule, build_prompt_additions, reload_rules
+from app.corrections import apply_learning_suggestions
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +54,8 @@ CAMPI RICERCATI:
 4. **numero_documento**: Numero del DDT
    - Cerca varianti: "Numero DDT", "DDT N.", "N. documento", "Documento N.", "Numero"
    - Prendi il numero completo (esempio: "DDT-12345" o "001234")
-   - Se c'è un prefisso tipo "DDT-", includilo
-
+   - Se c'è un prefisso tipo "DDT-", non includerlo.
+   
 5. **totale_kg**: Peso totale in chilogrammi
    - Cerca varianti: "Totale Kg", "Peso totale", "Kg complessivi", "Totale peso", "Peso (kg)"
    - Output: SOLO il numero (float), senza unità di misura
@@ -181,30 +191,83 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
         dynamic_prompt = build_dynamic_prompt(rule_name)
         
         # Converti PDF in immagini (OpenAI Vision richiede immagini, non PDF)
+        # Prova prima PyMuPDF (non richiede Poppler), poi pdf2image come fallback
+        img_b64 = None
+        image_format = "image/png"
+        
+        # Metodo 1: Prova con PyMuPDF (fitz) - migliore per Windows, non richiede Poppler
         try:
-            from pdf2image import convert_from_bytes
+            import fitz  # PyMuPDF
             from io import BytesIO
             
-            logger.info("Conversione PDF in immagine...")
-            # Converti la prima pagina del PDF in immagine
-            images = convert_from_bytes(pdf_bytes, first_page=1, last_page=1, dpi=200)
-            if not images:
-                raise ValueError("Impossibile convertire il PDF in immagine")
+            logger.info("Conversione PDF in immagine con PyMuPDF...")
+            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            if len(doc) == 0:
+                raise ValueError("PDF vuoto o non valido")
             
-            # Converti l'immagine in base64
-            img_buffer = BytesIO()
-            images[0].save(img_buffer, format='PNG')
-            img_bytes = img_buffer.getvalue()
+            # Converti la prima pagina in immagine
+            page = doc[0]
+            # Matrice di trasformazione per DPI 200 (200/72 = 2.78)
+            zoom = 200 / 72.0
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat)
+            
+            # Converti in PNG
+            img_bytes = pix.tobytes("png")
             img_b64 = base64.b64encode(img_bytes).decode()
-            image_format = "image/png"
-            logger.info(f"PDF convertito in immagine PNG ({len(img_bytes)} bytes)")
+            doc.close()
+            logger.info(f"PDF convertito in immagine PNG con PyMuPDF ({len(img_bytes)} bytes)")
             
         except ImportError:
-            logger.error("pdf2image non installato. Installalo con: pip install pdf2image Pillow")
-            raise ImportError("La libreria pdf2image è richiesta per processare i PDF. Installala con: pip install pdf2image Pillow")
+            logger.warning("PyMuPDF non disponibile, provo con pdf2image...")
+            # Metodo 2: Fallback a pdf2image (richiede Poppler su Windows)
+            try:
+                from pdf2image import convert_from_bytes
+                from io import BytesIO
+                
+                logger.info("Conversione PDF in immagine con pdf2image...")
+                images = convert_from_bytes(pdf_bytes, first_page=1, last_page=1, dpi=200)
+                if not images:
+                    raise ValueError("Impossibile convertire il PDF in immagine")
+                
+                img_buffer = BytesIO()
+                images[0].save(img_buffer, format='PNG')
+                img_bytes = img_buffer.getvalue()
+                img_b64 = base64.b64encode(img_bytes).decode()
+                logger.info(f"PDF convertito in immagine PNG con pdf2image ({len(img_bytes)} bytes)")
+                
+            except ImportError:
+                error_msg = "Nessuna libreria disponibile per convertire PDF. Installa PyMuPDF (consigliato) o pdf2image+Poppler"
+                logger.error(error_msg)
+                raise ImportError(error_msg)
+            except Exception as e:
+                error_msg = f"Errore conversione PDF con pdf2image: {e}. Suggerimento: su Windows installa Poppler o usa PyMuPDF"
+                logger.error(error_msg, exc_info=True)
+                raise ValueError(error_msg) from e
         except Exception as e:
-            logger.error(f"Errore conversione PDF in immagine: {e}", exc_info=True)
-            raise ValueError(f"Errore durante la conversione del PDF in immagine: {str(e)}") from e
+            logger.warning(f"Errore conversione PDF con PyMuPDF: {e}, provo fallback...")
+            # Fallback a pdf2image se PyMuPDF fallisce
+            try:
+                from pdf2image import convert_from_bytes
+                from io import BytesIO
+                
+                logger.info("Conversione PDF in immagine con pdf2image (fallback)...")
+                images = convert_from_bytes(pdf_bytes, first_page=1, last_page=1, dpi=200)
+                if not images:
+                    raise ValueError("Impossibile convertire il PDF in immagine")
+                
+                img_buffer = BytesIO()
+                images[0].save(img_buffer, format='PNG')
+                img_bytes = img_buffer.getvalue()
+                img_b64 = base64.b64encode(img_bytes).decode()
+                logger.info(f"PDF convertito in immagine PNG con pdf2image (fallback) ({len(img_bytes)} bytes)")
+            except Exception as e2:
+                error_msg = f"Errore conversione PDF: PyMuPDF fallito ({e}), pdf2image fallito ({e2})"
+                logger.error(error_msg, exc_info=True)
+                raise ValueError(error_msg) from e2
+        
+        if not img_b64:
+            raise ValueError("Impossibile convertire il PDF in immagine con nessun metodo disponibile")
         
         # Chiama OpenAI Vision
         try:
@@ -242,6 +305,13 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
         
         # Normalizza i dati prima della validazione
         normalized_data = _normalize_extracted_data(raw_data)
+        
+        # Applica suggerimenti di apprendimento automatico
+        try:
+            normalized_data = apply_learning_suggestions(normalized_data)
+            logger.info("Suggerimenti di apprendimento applicati")
+        except Exception as e:
+            logger.warning(f"Errore applicazione suggerimenti apprendimento: {e}")
         
         # Valida usando Pydantic
         try:
@@ -297,3 +367,53 @@ def _normalize_extracted_data(raw_data: Dict[str, Any]) -> Dict[str, Any]:
     normalized["totale_kg"] = normalize_float(kg_raw) or 0.0
     
     return normalized
+
+
+if __name__ == "__main__":
+    """
+    Permette di eseguire extract.py direttamente per test
+    Uso: python app/extract.py <percorso_file.pdf>
+    """
+    import sys
+    import os
+    
+    # Aggiungi la directory root al path Python quando eseguito come script
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir = os.path.dirname(script_dir)
+    if root_dir not in sys.path:
+        sys.path.insert(0, root_dir)
+    
+    if len(sys.argv) < 2:
+        print("Uso: python app/extract.py <percorso_file.pdf>")
+        print("\nEsempio:")
+        print("  python app/extract.py inbox/file.pdf")
+        sys.exit(1)
+    
+    pdf_path = sys.argv[1]
+    
+    if not os.path.exists(pdf_path):
+        print(f"❌ Errore: File non trovato: {pdf_path}")
+        sys.exit(1)
+    
+    if not pdf_path.lower().endswith('.pdf'):
+        print("❌ Errore: Il file deve essere un PDF")
+        sys.exit(1)
+    
+    print(f"📄 Estrazione dati da: {pdf_path}")
+    print("⏳ Elaborazione in corso...\n")
+    
+    try:
+        data = extract_from_pdf(pdf_path)
+        print("✅ Estrazione completata con successo!\n")
+        print("📋 Dati estratti:")
+        print(f"  📅 Data: {data.get('data', 'N/A')}")
+        print(f"  🏢 Mittente: {data.get('mittente', 'N/A')}")
+        print(f"  📍 Destinatario: {data.get('destinatario', 'N/A')}")
+        print(f"  🔢 Numero Documento: {data.get('numero_documento', 'N/A')}")
+        print(f"  ⚖️ Totale Kg: {data.get('totale_kg', 'N/A')}")
+        print("\n✅ Test completato!")
+    except Exception as e:
+        print(f"\n❌ Errore durante l'estrazione: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)

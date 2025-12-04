@@ -1,0 +1,555 @@
+{% extends "base.html" %}
+
+{% block title %}Login{% endblock %}
+
+{% block header_title %}🔐 Accesso DDT Extractor{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Nascondi la navigazione nella pagina di login */
+    nav {
+        display: none;
+    }
+    
+    /* Layout speciale per login */
+    body.login-page {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        background: linear-gradient(135deg, var(--oceano-profondo) 0%, var(--oceano-medio) 50%, var(--oceano-chiaro) 100%);
+        position: relative;
+        overflow: hidden;
+    }
+    
+    /* Animazione onde di sfondo */
+    body.login-page::before {
+        content: '';
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        height: 40%;
+        background: linear-gradient(to top, rgba(44, 116, 179, 0.3) 0%, transparent 100%);
+        animation: wave 8s ease-in-out infinite;
+        z-index: 0;
+    }
+    
+    body.login-page::after {
+        content: '';
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        height: 35%;
+        background: linear-gradient(to top, rgba(32, 82, 149, 0.2) 0%, transparent 100%);
+        animation: wave 10s ease-in-out infinite reverse;
+        z-index: 0;
+    }
+    
+    @keyframes wave {
+        0%, 100% {
+            transform: translateY(0) scaleY(1);
+        }
+        50% {
+            transform: translateY(-10px) scaleY(1.05);
+        }
+    }
+    
+    /* Header personalizzato per login */
+    body.login-page header {
+        background: rgba(10, 38, 71, 0.9);
+        backdrop-filter: blur(10px);
+        border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        position: relative;
+        z-index: 10;
+    }
+    
+    body.login-page header h1 {
+        color: var(--schiuma-bianca);
+        text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+    }
+    
+    /* Footer trasparente */
+    body.login-page footer {
+        background: transparent;
+        color: rgba(255, 255, 255, 0.7);
+        margin-top: auto;
+        position: relative;
+        z-index: 10;
+    }
+    
+    /* Container login */
+    .login-container {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: var(--spacing-xxl) var(--spacing-lg);
+        position: relative;
+        z-index: 5;
+        min-height: calc(100vh - 200px);
+    }
+    
+    /* Card login migliorata */
+    .login-card {
+        background: rgba(255, 255, 255, 0.98);
+        backdrop-filter: blur(20px);
+        padding: var(--spacing-xxl) var(--spacing-xl);
+        border-radius: var(--radius-xl);
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1);
+        max-width: 450px;
+        width: 100%;
+        position: relative;
+        animation: fadeInUp 0.6s ease-out;
+        border: 2px solid rgba(44, 116, 179, 0.2);
+    }
+    
+    @keyframes fadeInUp {
+        from {
+            opacity: 0;
+            transform: translateY(30px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+    
+    /* Effetto glow sulla card */
+    .login-card::before {
+        content: '';
+        position: absolute;
+        top: -2px;
+        left: -2px;
+        right: -2px;
+        bottom: -2px;
+        background: linear-gradient(135deg, var(--acqua-azzurra), var(--oceano-medio), var(--onda-verde));
+        border-radius: var(--radius-xl);
+        opacity: 0;
+        z-index: -1;
+        transition: opacity 0.5s ease;
+    }
+    
+    .login-card:hover::before {
+        opacity: 0.3;
+    }
+    
+    /* Titolo login */
+    .login-title {
+        text-align: center;
+        margin-bottom: var(--spacing-xl);
+        color: var(--oceano-profondo);
+        font-size: 2em;
+        font-weight: 700;
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--spacing-md);
+    }
+    
+    .login-title::after {
+        content: '🌊';
+        font-size: 0.8em;
+        animation: float 3s ease-in-out infinite;
+    }
+    
+    @keyframes float {
+        0%, 100% {
+            transform: translateY(0);
+        }
+        50% {
+            transform: translateY(-10px);
+        }
+    }
+    
+    /* Input group migliorato */
+    .input-wrapper {
+        position: relative;
+        margin-bottom: var(--spacing-lg);
+    }
+    
+    .input-wrapper label {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-sm);
+        margin-bottom: var(--spacing-sm);
+        color: var(--oceano-profondo);
+        font-weight: 600;
+        font-size: 0.95em;
+    }
+    
+    .input-wrapper label::before {
+        font-size: 1.2em;
+    }
+    
+    .input-wrapper input[type="text"],
+    .input-wrapper input[type="password"] {
+        width: 100%;
+        padding: 14px 16px 14px 45px;
+        border: 2px solid var(--perla);
+        border-radius: var(--radius-md);
+        font-family: inherit;
+        font-size: 15px;
+        transition: all var(--transition-normal);
+        background: var(--schiuma-bianca);
+        color: var(--oceano-profondo);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    }
+    
+    .input-wrapper input[type="text"]:focus,
+    .input-wrapper input[type="password"]:focus {
+        outline: none;
+        border-color: var(--acqua-azzurra);
+        box-shadow: 0 0 0 4px rgba(44, 116, 179, 0.15), 0 4px 12px rgba(0, 0, 0, 0.1);
+        transform: translateY(-1px);
+    }
+    
+    /* Icone negli input */
+    .input-icon {
+        position: absolute;
+        left: 14px;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 1.3em;
+        color: var(--oceano-medio);
+        pointer-events: none;
+        transition: color var(--transition-normal);
+        z-index: 1;
+    }
+    
+    .input-wrapper:focus-within .input-icon {
+        color: var(--acqua-azzurra);
+    }
+    
+    /* Toggle password */
+    .password-toggle {
+        position: absolute;
+        right: 14px;
+        top: 50%;
+        transform: translateY(-50%);
+        background: none;
+        border: none;
+        font-size: 1.2em;
+        cursor: pointer;
+        color: var(--oceano-medio);
+        transition: all var(--transition-normal);
+        z-index: 1;
+        padding: 5px;
+        border-radius: var(--radius-sm);
+    }
+    
+    .password-toggle:hover {
+        color: var(--acqua-azzurra);
+        background: rgba(44, 116, 179, 0.1);
+        transform: translateY(-50%) scale(1.1);
+    }
+    
+    .password-toggle:active {
+        transform: translateY(-50%) scale(0.95);
+    }
+    
+    /* Bottone submit migliorato */
+    .login-submit-btn {
+        width: 100%;
+        padding: 16px;
+        margin-top: var(--spacing-lg);
+        font-size: 1.1em;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .login-submit-btn::before {
+        content: '';
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 0;
+        height: 0;
+        border-radius: 50%;
+        background: rgba(255, 255, 255, 0.3);
+        transform: translate(-50%, -50%);
+        transition: width 0.6s, height 0.6s;
+    }
+    
+    .login-submit-btn:hover::before {
+        width: 300px;
+        height: 300px;
+    }
+    
+    /* Messaggio errore migliorato */
+    #message {
+        margin-bottom: var(--spacing-xl);
+        animation: shake 0.5s ease-out;
+    }
+    
+    @keyframes shake {
+        0%, 100% { transform: translateX(0); }
+        25% { transform: translateX(-10px); }
+        75% { transform: translateX(10px); }
+    }
+    
+    /* Responsive */
+    @media (max-width: 768px) {
+        .login-card {
+            padding: var(--spacing-xl) var(--spacing-lg);
+            margin: var(--spacing-lg);
+        }
+        
+        .login-title {
+            font-size: 1.6em;
+        }
+    }
+    
+    /* Animazione di successo */
+    .login-success {
+        animation: successPulse 0.6s ease-out;
+    }
+    
+    @keyframes successPulse {
+        0% {
+            transform: scale(1);
+        }
+        50% {
+            transform: scale(1.05);
+        }
+        100% {
+            transform: scale(1);
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="login-container">
+    <div class="login-card">
+        <h2 class="login-title">Accedi al Sistema</h2>
+        
+        <div id="message" class="message hidden"></div>
+        
+        <form id="login-form">
+            <div class="input-wrapper">
+                <label for="username">
+                    👤 Username
+                </label>
+                <div style="position: relative;">
+                    <span class="input-icon">👤</span>
+                    <input 
+                        type="text" 
+                        id="username" 
+                        name="username" 
+                        required 
+                        autofocus
+                        placeholder="Inserisci il tuo username"
+                        autocomplete="username"
+                    >
+                </div>
+            </div>
+            
+            <div class="input-wrapper">
+                <label for="password">
+                    🔒 Password
+                </label>
+                <div style="position: relative;">
+                    <span class="input-icon">🔒</span>
+                    <input 
+                        type="password" 
+                        id="password" 
+                        name="password" 
+                        required
+                        placeholder="Inserisci la tua password"
+                        autocomplete="current-password"
+                    >
+                    <button 
+                        type="button" 
+                        class="password-toggle" 
+                        id="toggle-password"
+                        aria-label="Mostra/Nascondi password"
+                    >
+                        👁️
+                    </button>
+                </div>
+            </div>
+            
+            <button type="submit" class="btn btn-primary login-submit-btn">
+                <span class="btn-text">🔓 Accedi</span>
+            </button>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Aggiungi classe al body per stili speciali
+    document.body.classList.add('login-page');
+    
+    // Toggle mostra/nascondi password
+    const togglePassword = document.getElementById('toggle-password');
+    const passwordInput = document.getElementById('password');
+    
+    togglePassword.addEventListener('click', () => {
+        const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
+        passwordInput.setAttribute('type', type);
+        togglePassword.textContent = type === 'password' ? '👁️' : '🙈';
+    });
+    
+    function showMessage(text, type = 'error') {
+        const msgDiv = document.getElementById('message');
+        msgDiv.innerHTML = `<strong>${type === 'error' ? '⚠️' : '✅'}</strong> ${text}`;
+        msgDiv.className = `message ${type}`;
+        msgDiv.classList.remove('hidden');
+        
+        // Scroll al messaggio
+        msgDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        
+        setTimeout(() => {
+            msgDiv.classList.add('hidden');
+        }, 5000);
+    }
+
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const username = document.getElementById('username').value.trim();
+        const password = document.getElementById('password').value;
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        const btnText = submitBtn.querySelector('.btn-text');
+        const originalText = btnText.textContent;
+        const loginCard = document.querySelector('.login-card');
+        
+        // Validazione base
+        if (!username) {
+            showMessage('Inserisci uno username', 'error');
+            document.getElementById('username').focus();
+            return;
+        }
+        
+        if (!password) {
+            showMessage('Inserisci una password', 'error');
+            document.getElementById('password').focus();
+            return;
+        }
+        
+        try {
+            submitBtn.disabled = true;
+            btnText.textContent = '⏳ Accesso in corso...';
+            submitBtn.classList.add('loading');
+            
+            const formData = new FormData();
+            formData.append('username', username);
+            formData.append('password', password);
+            
+            const response = await fetch('/login', {
+                method: 'POST',
+                body: formData,
+                credentials: 'include',
+                headers: {
+                    'Accept': 'application/json'
+                }
+            });
+            
+            // Gestisci risposta JSON
+            const contentType = response.headers.get('content-type') || '';
+            
+            if (contentType.includes('application/json')) {
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    // Successo - animazione e redirect
+                    loginCard.classList.add('login-success');
+                    btnText.textContent = '✅ Accesso riuscito!';
+                    
+                    // Usa il redirect dal server o default a dashboard
+                    const redirectUrl = data.redirect || '/dashboard';
+                    setTimeout(() => {
+                        window.location.href = redirectUrl;
+                    }, 500);
+                } else {
+                    // Errore
+                    showMessage(data.detail || 'Credenziali non valide', 'error');
+                    document.getElementById('password').value = '';
+                    document.getElementById('password').focus();
+                    submitBtn.disabled = false;
+                    submitBtn.classList.remove('loading');
+                    btnText.textContent = originalText;
+                }
+            } else {
+                // Fallback: se non è JSON, prova a gestire come HTML redirect
+                if (response.ok || response.status === 302) {
+                    // Login riuscito con redirect HTML
+                    loginCard.classList.add('login-success');
+                    btnText.textContent = '✅ Accesso riuscito!';
+                    setTimeout(() => {
+                        window.location.href = '/dashboard';
+                    }, 300);
+                } else {
+                    // Errore
+                    showMessage('Credenziali non valide', 'error');
+                    document.getElementById('password').value = '';
+                    document.getElementById('password').focus();
+                    submitBtn.disabled = false;
+                    submitBtn.classList.remove('loading');
+                    btnText.textContent = originalText;
+                }
+            }
+        } catch (error) {
+            console.error('Errore login:', error);
+            showMessage('Errore durante il login. Verifica la connessione e riprova.', 'error');
+            submitBtn.disabled = false;
+            submitBtn.classList.remove('loading');
+            btnText.textContent = originalText;
+        }
+    });
+    
+    // Focus automatico e miglioramenti UX
+    document.addEventListener('DOMContentLoaded', () => {
+        const username = document.getElementById('username');
+        const password = document.getElementById('password');
+        
+        // Focus su username
+        if (username && !username.value) {
+            setTimeout(() => username.focus(), 100);
+        }
+        
+        // Enter key navigation
+        username.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                password.focus();
+            }
+        });
+        
+        password.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                document.getElementById('login-form').dispatchEvent(new Event('submit'));
+            }
+        });
+        
+        // Animazione input focus
+        [username, password].forEach(input => {
+            input.addEventListener('focus', () => {
+                input.parentElement.parentElement.style.transform = 'scale(1.01)';
+            });
+            
+            input.addEventListener('blur', () => {
+                input.parentElement.parentElement.style.transform = 'scale(1)';
+            });
+        });
+    });
+    
+    // Prevenisci refresh accidentale durante il login
+    let isSubmitting = false;
+    window.addEventListener('beforeunload', (e) => {
+        if (isSubmitting) {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+    });
+</script>
+{% endblock %}
+

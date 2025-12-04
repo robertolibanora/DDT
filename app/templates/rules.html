@@ -20,6 +20,11 @@
                     <strong>ℹ️ Come funziona:</strong> Quando carichi un DDT PDF, il sistema estrae il testo e cerca automaticamente le keyword che hai definito. Se trova una corrispondenza, applica le istruzioni speciali che hai scritto, che vengono aggiunte al prompt AI per migliorare l'estrazione dati.
                 </p>
             </div>
+            <div style="background: linear-gradient(135deg, rgba(0, 200, 83, 0.1) 0%, rgba(0, 200, 83, 0.05) 100%); padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #00c853;">
+                <p style="color: var(--oceano-profondo); margin: 0; line-height: 1.6;">
+                    <strong>🤖 Apprendimento Automatico:</strong> Il sistema crea automaticamente regole quando riconosce pattern comuni nelle correzioni (dopo 5 correzioni simili). Le regole automatiche sono contrassegnate con l'icona 🤖 e possono essere modificate o eliminate come le regole manuali.
+                </p>
+            </div>
             <button id="add-rule-btn" class="btn btn-add">➕ Aggiungi Nuova Regola</button>
             <div id="rules-list">
                 <div class="empty-state">Caricamento regole...</div>
@@ -106,9 +111,13 @@
 
         async function loadRules() {
             try {
-                const res = await fetch('/api/rules');
+                const res = await fetch('/api/rules', {
+                    credentials: 'include'
+                });
                 const data = await res.json();
                 rules = data.rules || {};
+                // Salva le regole automatiche globalmente per il rendering
+                window.autoRules = data.auto_rules || [];
                 renderRules();
             } catch (error) {
                 console.error('Errore caricamento regole:', error);
@@ -120,19 +129,27 @@
             const container = document.getElementById('rules-list');
             
             if (Object.keys(rules).length === 0) {
-                container.innerHTML = '<div class="empty-state">Nessuna regola configurata. Aggiungine una per iniziare.</div>';
+                container.innerHTML = '<div class="empty-state">Nessuna regola configurata. Aggiungine una per iniziare o correggi alcuni DDT per generare regole automatiche.</div>';
                 return;
             }
+
+            // Ottieni lista regole automatiche se disponibile
+            const autoRules = window.autoRules || [];
 
             container.innerHTML = Object.entries(rules).map(([name, rule]) => {
                 const keywords = rule.detect || [];
                 const instructions = escapeHtml(rule.instructions || '');
                 const overrides = rule.overrides || {};
+                const isAuto = rule.is_auto || autoRules.includes(name);
+                const autoBadge = isAuto ? '<span class="auto-rule-badge" title="Regola creata automaticamente dal sistema">🤖 Auto</span>' : '';
                 
                 return `
-                    <div class="rule-item" data-rule-name="${escapeHtml(name)}">
+                    <div class="rule-item ${isAuto ? 'rule-item-auto' : ''}" data-rule-name="${escapeHtml(name)}">
                         <div class="rule-header">
-                            <div class="rule-name">${escapeHtml(name)}</div>
+                            <div class="rule-name">
+                                ${escapeHtml(name)}
+                                ${autoBadge}
+                            </div>
                             <div class="rule-actions">
                                 <button class="btn btn-edit" onclick="editRule('${escapeHtml(name)}')">✏️ Modifica</button>
                                 <button class="btn btn-delete" onclick="deleteRule('${escapeHtml(name)}')">🗑️ Elimina</button>
@@ -209,7 +226,8 @@
                 const res = await fetch(url, {
                     method: method,
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
+                    body: JSON.stringify(payload),
+                    credentials: 'include'
                 });
 
                 const data = await res.json();
@@ -234,7 +252,8 @@
 
             try {
                 const res = await fetch(`/api/rules/${name}`, {
-                    method: 'DELETE'
+                    method: 'DELETE',
+                    credentials: 'include'
                 });
 
                 const data = await res.json();
@@ -270,7 +289,8 @@
                 const res = await fetch(`/reprocess/${encodeURIComponent(docNumber)}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ numero_documento: docNumber })
+                    body: JSON.stringify({ numero_documento: docNumber }),
+                    credentials: 'include'
                 });
 
                 const data = await res.json();

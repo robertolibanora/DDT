@@ -63,7 +63,11 @@ body {
     background: linear-gradient(135deg, var(--spuma-bianca) 0%, var(--perla) 50%, var(--schiuma-bianca) 100%);
     min-height: 100vh;
     color: var(--oceano-profondo);
-    line-height: 1.6;
+    line-height: 1.7;
+    font-size: 16px; /* Base font size per migliore leggibilità */
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden; /* Previene scrolling orizzontale */
 }
 
 /* ============================================
@@ -99,10 +103,12 @@ header::before {
 header h1 {
     color: var(--schiuma-bianca);
     margin-bottom: var(--spacing-sm);
-    font-size: 2em;
+    font-size: clamp(1.5em, 4vw, 2em); /* Responsive font size */
     text-shadow: 2px 2px 4px var(--ombra-profonda);
     position: relative;
     z-index: 1;
+    font-weight: 700;
+    letter-spacing: -0.02em;
 }
 
 nav {
@@ -115,14 +121,19 @@ nav {
 }
 
 nav a {
-    color: var(--perla);
+    color: var(--schiuma-bianca);
     text-decoration: none;
     padding: var(--spacing-sm) var(--spacing-lg);
     border-radius: var(--radius-md);
     background: rgba(255, 255, 255, 0.1);
     transition: all var(--transition-normal);
-    font-size: 0.9em;
+    font-size: clamp(0.85em, 2vw, 0.95em);
     border: 1px solid rgba(255, 255, 255, 0.2);
+    font-weight: 500;
+    min-height: 44px; /* Touch target minimo per mobile */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 nav a:hover {
@@ -213,6 +224,9 @@ nav a.active {
     position: relative;
     overflow: hidden;
     min-height: 44px; /* Touch target minimo */
+    min-width: 44px; /* Touch target minimo */
+    font-family: inherit;
+    -webkit-tap-highlight-color: transparent; /* Rimuove highlight su mobile */
 }
 
 /* Effetto ripple al click - migliorato */
@@ -406,20 +420,39 @@ nav a.active {
     color: var(--oceano-profondo);
     font-weight: 600;
     font-size: 0.95em;
+    line-height: 1.5;
+}
+
+.form-group small,
+.form-help {
+    display: block;
+    margin-top: var(--spacing-xs);
+    color: var(--oceano-medio);
+    font-size: 0.875em;
+    font-style: italic;
+    opacity: 0.9;
+    line-height: 1.5;
 }
 
 .form-group input[type="text"],
 .form-group input[type="file"],
 .form-group textarea {
     width: 100%;
-    padding: 12px;
+    padding: 12px 16px;
     border: 2px solid var(--perla);
     border-radius: var(--radius-md);
     font-family: inherit;
-    font-size: 14px;
+    font-size: 16px; /* Previene zoom su iOS */
     transition: all var(--transition-normal);
     background: white;
     color: var(--oceano-profondo);
+    line-height: 1.5;
+}
+
+.form-group input[type="text"]::placeholder,
+.form-group textarea::placeholder {
+    color: var(--oceano-medio);
+    opacity: 0.7;
 }
 
 .form-group input[type="file"] {
@@ -470,15 +503,6 @@ nav a.active {
     accent-color: var(--acqua-azzurra);
 }
 
-.form-group small,
-.form-help {
-    display: block;
-    margin-top: var(--spacing-xs);
-    color: var(--oceano-medio);
-    font-size: 0.85em;
-    font-style: italic;
-    opacity: 0.8;
-}
 
 .reprocess-form {
     display: flex;
@@ -526,20 +550,29 @@ nav a.active {
 
 .message.success {
     background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
-    color: #2e7d32;
+    color: #1b5e20;
     border-left: 4px solid var(--successo);
+    font-weight: 500;
 }
 
 .message.error {
     background: linear-gradient(135deg, #ffe5e5 0%, #ffcccc 100%);
-    color: #8b0000;
+    color: #b71c1c;
     border-left: 4px solid var(--corallo);
+    font-weight: 500;
 }
 
 .message.info {
     background: linear-gradient(135deg, var(--perla) 0%, var(--spuma-bianca) 100%);
     color: var(--oceano-profondo);
     border-left: 4px solid var(--acqua-azzurra);
+    font-weight: 500;
+}
+
+/* Icone nei messaggi */
+.message::before {
+    font-size: 1.2em;
+    flex-shrink: 0;
 }
 
 .message.hidden {
@@ -681,6 +714,32 @@ tbody tr:last-child {
 td {
     padding: var(--spacing-md);
     color: var(--oceano-profondo);
+    font-size: 0.95em;
+}
+
+/* Miglioramenti leggibilità per testo */
+p, li, span, div {
+    color: var(--oceano-profondo);
+    line-height: 1.7;
+}
+
+/* Contrasto migliorato per link */
+a:not(nav a) {
+    color: var(--acqua-azzurra);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    transition: color var(--transition-fast);
+}
+
+a:not(nav a):hover {
+    color: var(--oceano-profondo);
+    text-decoration-thickness: 2px;
+}
+
+a:not(nav a):focus-visible {
+    outline: 2px solid var(--acqua-azzurra);
+    outline-offset: 2px;
+    border-radius: 2px;
 }
 
 td:last-child {
@@ -1015,32 +1074,45 @@ td:last-child {
     }
 }
 
-/* Animazioni per elementi che appaiono */
+/* Animazioni per elementi che appaiono - Ottimizzate per performance */
+@media (prefers-reduced-motion: no-preference) {
 .card,
 .section {
-    animation: fadeIn 0.5s ease-out;
+        animation: fadeIn 0.4s ease-out;
 }
 
 .rule-item {
-    animation: slideIn 0.4s ease-out;
+        animation: slideIn 0.3s ease-out;
 }
 
 .stat-item {
-    animation: fadeIn 0.4s ease-out;
+        animation: fadeIn 0.3s ease-out;
 }
 
 /* Animazione per righe tabella con delay progressivo */
 tbody tr {
-    animation: slideInUp 0.4s ease-out;
+        animation: slideInUp 0.3s ease-out;
     animation-fill-mode: both;
 }
 
-tbody tr:nth-child(1) { animation-delay: 0.05s; }
-tbody tr:nth-child(2) { animation-delay: 0.1s; }
-tbody tr:nth-child(3) { animation-delay: 0.15s; }
-tbody tr:nth-child(4) { animation-delay: 0.2s; }
-tbody tr:nth-child(5) { animation-delay: 0.25s; }
-tbody tr:nth-child(n+6) { animation-delay: 0.3s; }
+    tbody tr:nth-child(1) { animation-delay: 0.03s; }
+    tbody tr:nth-child(2) { animation-delay: 0.06s; }
+    tbody tr:nth-child(3) { animation-delay: 0.09s; }
+    tbody tr:nth-child(4) { animation-delay: 0.12s; }
+    tbody tr:nth-child(5) { animation-delay: 0.15s; }
+    tbody tr:nth-child(n+6) { animation-delay: 0.18s; }
+}
+
+/* Riduce animazioni per utenti che preferiscono meno movimento */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
 
 /* Animazione per modal */
 #rule-modal > div {
@@ -1069,14 +1141,67 @@ a, button, input, textarea, select {
 
 /* Focus visible per accessibilità */
 *:focus-visible {
-    outline: 2px solid var(--acqua-azzurra);
-    outline-offset: 2px;
+    outline: 3px solid var(--acqua-azzurra);
+    outline-offset: 3px;
     border-radius: var(--radius-sm);
+    box-shadow: 0 0 0 1px var(--schiuma-bianca);
 }
 
-/* Smooth scroll */
+/* Miglioramenti accessibilità */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+    outline-width: 3px;
+}
+
+/* Skip link per accessibilità */
+.skip-link {
+    position: absolute;
+    top: -40px;
+    left: 0;
+    background: var(--oceano-profondo);
+    color: var(--schiuma-bianca);
+    padding: var(--spacing-sm) var(--spacing-lg);
+    text-decoration: none;
+    z-index: 10000;
+    border-radius: 0 0 var(--radius-md) 0;
+}
+
+.skip-link:focus {
+    top: 0;
+}
+
+/* Smooth scroll - rispetta preferenze utente */
+@media (prefers-reduced-motion: no-preference) {
 html {
     scroll-behavior: smooth;
+    }
+}
+
+/* Main content */
+main {
+    min-height: 50vh;
+}
+
+/* Miglioramenti gerarchia visiva */
+h1, h2, h3, h4, h5, h6 {
+    font-weight: 700;
+    line-height: 1.3;
+    margin-bottom: var(--spacing-md);
+    color: var(--oceano-profondo);
+}
+
+h1 {
+    font-size: clamp(1.8em, 5vw, 2.5em);
+}
+
+h2 {
+    font-size: clamp(1.4em, 4vw, 1.8em);
+}
+
+h3 {
+    font-size: clamp(1.2em, 3vw, 1.4em);
 }
 
 /* ============================================
@@ -1112,59 +1237,112 @@ footer {
 }
 
 /* ============================================
-   RESPONSIVE
+   RESPONSIVE - MOBILE FIRST
    ============================================ */
 @media (max-width: 768px) {
     body {
         padding: var(--spacing-sm);
+        font-size: 15px; /* Leggermente più piccolo su mobile */
     }
     
     header {
         padding: var(--spacing-lg);
+        border-radius: var(--radius-lg);
     }
     
     header h1 {
         font-size: 1.5em;
+        margin-bottom: var(--spacing-md);
     }
     
     nav {
         flex-direction: column;
+        gap: var(--spacing-sm);
+        margin-top: var(--spacing-md);
+    }
+    
+    nav a {
+        width: 100%;
+        justify-content: flex-start;
+        padding: var(--spacing-md) var(--spacing-lg);
     }
     
     .card,
     .section {
         padding: var(--spacing-lg);
+        border-radius: var(--radius-lg);
+        margin-bottom: var(--spacing-md);
+    }
+    
+    .card h2,
+    .section h2 {
+        font-size: 1.2em;
     }
     
     #stats {
         flex-direction: column;
         gap: var(--spacing-md);
+        padding: var(--spacing-md);
+    }
+    
+    .stat-item {
+        width: 100%;
+    }
+    
+    .stat-value {
+        font-size: 1.8em;
     }
     
     table {
-        font-size: 0.9em;
+        font-size: 0.875em;
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        width: 100%;
+    }
+    
+    thead {
+        display: table-header-group;
+    }
+    
+    tbody {
+        display: table-row-group;
     }
     
     th, td {
-        padding: var(--spacing-sm) var(--spacing-sm);
+        padding: var(--spacing-sm);
+        white-space: nowrap;
+        min-width: 80px;
+    }
+    
+    th:first-child,
+    td:first-child {
+        position: sticky;
+        left: 0;
+        background: inherit;
+        z-index: 1;
     }
     
     .rule-header {
         flex-direction: column;
         align-items: flex-start;
+        gap: var(--spacing-md);
     }
     
     .rule-actions {
         width: 100%;
+        flex-direction: column;
     }
     
     .rule-actions .btn {
-        flex: 1;
+        width: 100%;
         text-align: center;
     }
     
     #rule-modal > div {
         padding: var(--spacing-lg);
+        margin: var(--spacing-md);
+        max-height: 95vh;
     }
     
     .reprocess-form {
@@ -1173,6 +1351,62 @@ footer {
     
     .reprocess-form input {
         min-width: 100%;
+        width: 100%;
+    }
+    
+    .btn {
+        width: 100%;
+        padding: var(--spacing-md) var(--spacing-lg);
+    }
+    
+    .form-group input[type="text"],
+    .form-group textarea {
+        font-size: 16px; /* Previene zoom su iOS */
+    }
+    
+    .message {
+        padding: var(--spacing-md);
+        font-size: 0.9em;
+    }
+    
+    .empty-state {
+        padding: 60px var(--spacing-md);
+        font-size: 1em;
+    }
+}
+
+/* Tablet */
+@media (min-width: 769px) and (max-width: 1024px) {
+    body {
+        padding: var(--spacing-md);
+    }
+    
+    header {
+        padding: var(--spacing-lg) var(--spacing-xl);
+    }
+    
+    nav {
+        gap: var(--spacing-sm);
+    }
+    
+    #stats {
+        gap: var(--spacing-lg);
+    }
+    
+    table {
+        font-size: 0.95em;
+    }
+}
+
+/* Desktop grande */
+@media (min-width: 1201px) {
+    body {
+        max-width: 1400px;
+    }
+    
+    .card,
+    .section {
+        padding: var(--spacing-xxl);
     }
 }
 
