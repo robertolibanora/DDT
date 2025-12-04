@@ -600,6 +600,27 @@
         "numero_documento",
         "totale_kg"
       ]
+    },
+    "5daeaafd259ef7d1d40def1b65acce4f_20251204_125328": {
+      "file_path": "inbox\\8143_ITTICA_GESIA_SRL_20251204_122822.pdf",
+      "file_name": "8143_ITTICA_GESIA_SRL_20251204_122822.pdf",
+      "file_hash": "5daeaafd259ef7d1d40def1b65acce4f",
+      "original_data": {
+        "data": "2025-08-22",
+        "mittente": "ITTICA GESIA SRL",
+        "destinatario": "ANTONIO VERRINI S.R.L.",
+        "numero_documento": "8143",
+        "totale_kg": 20
+      },
+      "corrected_data": {
+        "data": "2025-08-22",
+        "mittente": "ITTICA GESIA SRL",
+        "destinatario": "ANTONIO VERRINI S.R.L.",
+        "numero_documento": "8143",
+        "totale_kg": 20.0
+      },
+      "timestamp": "2025-12-04T12:53:28.162067",
+      "fields_changed": []
     }
   },
   "learning_patterns": {

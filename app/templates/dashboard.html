@@ -159,27 +159,10 @@
                         <td>${escapeHtml(row.destinatario || '-')}</td>
                         <td>${numeroDoc}</td>
                         <td>${kg}</td>
-                        <td>
-                            <button class="btn-reopen" 
-                                    data-numero="${numeroDoc}" 
-                                    data-mittente="${mittente}"
-                                    title="Riapri anteprima">
-                                🔍 Anteprima
-                            </button>
-                        </td>
+                        <td>-</td>
                     </tr>
                 `;
             }).join('');
-            
-            // Aggiungi event listener ai pulsanti di riapertura
-            document.querySelectorAll('.btn-reopen').forEach(btn => {
-                btn.addEventListener('click', async function(event) {
-                    event.preventDefault();
-                    const numeroDoc = this.getAttribute('data-numero');
-                    const mittente = this.getAttribute('data-mittente');
-                    await reopenPreview(numeroDoc, mittente, this);
-                });
-            });
         }
 
         function updateStats(rows) {
@@ -266,60 +249,6 @@
             } finally {
                 clearBtn.disabled = false;
                 clearBtn.textContent = originalText;
-            }
-        }
-        
-        // Funzione per riaprire l'anteprima di un DDT
-        async function reopenPreview(numeroDocumento, mittente, btnElement) {
-            if (!window.previewModal) {
-                showError('⚠️ Modal di anteprima non disponibile. Ricarica la pagina.');
-                return;
-            }
-            
-            const btn = btnElement || document.querySelector(`.btn-reopen[data-numero="${numeroDocumento}"]`);
-            const originalText = btn ? btn.textContent : '';
-            
-            try {
-                if (btn) {
-                    btn.disabled = true;
-                    btn.textContent = '⏳ Caricamento...';
-                }
-                
-                // Costruisci URL con parametri
-                const url = `/api/ddt/${encodeURIComponent(numeroDocumento)}/reopen${mittente ? '?mittente=' + encodeURIComponent(mittente) : ''}`;
-                
-                const response = await fetch(url, {
-                    credentials: 'include'
-                });
-                
-                if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({ detail: 'Errore sconosciuto' }));
-                    throw new Error(errorData.detail || `Errore ${response.status}`);
-                }
-                
-                const data = await response.json();
-                
-                if (!data.success || !data.extracted_data) {
-                    throw new Error('Dati non validi ricevuti dal server');
-                }
-                
-                // Mostra la modal con i dati recuperati
-                window.previewModal.show(
-                    data.extracted_data,
-                    data.pdf_base64,
-                    data.file_hash,
-                    data.file_name
-                );
-                
-            } catch (error) {
-                console.error('Errore riapertura anteprima:', error);
-                showError(`❌ Errore: ${error.message}`);
-                setTimeout(() => hideError(), 5000);
-            } finally {
-                if (btn) {
-                    btn.disabled = false;
-                    btn.textContent = originalText;
-                }
             }
         }
         

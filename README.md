@@ -7,7 +7,7 @@ Sistema avanzato per l'estrazione automatica e la gestione intelligente dei DDT 
 - 📄 **Upload Manuale**: Carica DDT PDF tramite interfaccia web intuitiva
 - 🤖 **Estrazione AI**: Estrazione automatica dei dati tramite OpenAI Vision
 - 📊 **Dashboard in Tempo Reale**: Visualizzazione con aggiornamento automatico ogni 3 secondi
-- 👀 **Monitoraggio Automatico**: Watchdog integrato che monitora la cartella `inbox/` e processa i PDF automaticamente
+- 👀 **Monitoraggio Automatico**: Watchdog integrato che monitora la cartella `inbox/` e processa i PDF automaticamente. 
 - 💾 **Salvataggio Excel**: Dati salvati automaticamente in file Excel
 - ⚙️ **Sistema di Regole Dinamiche**: Crea e gestisci regole personalizzate per migliorare l'estrazione per fornitori specifici
 - 🔄 **Riprocessing**: Riprocessa DDT esistenti con regole aggiornate

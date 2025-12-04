@@ -86,37 +86,6 @@
     cursor: not-allowed;
 }
 
-/* Pulsante riapri anteprima */
-.btn-reopen {
-    background: linear-gradient(135deg, var(--acqua-azzurra) 0%, var(--oceano-medio) 100%);
-    color: white;
-    border: none;
-    padding: 8px 16px;
-    border-radius: 6px;
-    font-size: 0.9em;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-    white-space: nowrap;
-}
-
-.btn-reopen:hover {
-    background: linear-gradient(135deg, var(--oceano-medio) 0%, var(--oceano-profondo) 100%);
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-}
-
-.btn-reopen:active {
-    transform: translateY(0);
-}
-
-.btn-reopen:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-    transform: none;
-}
-
 /* Colonna azioni nella tabella */
 table td:last-child {
     text-align: center;
@@ -144,13 +113,6 @@ table td:last-child {
         padding: var(--spacing-sm);
         font-size: 0.875em;
         min-width: 100px;
-    }
-    
-    .btn-reopen {
-        padding: var(--spacing-sm) var(--spacing-md);
-        font-size: 0.85em;
-        width: 100%;
-        max-width: 150px;
     }
 }
 
