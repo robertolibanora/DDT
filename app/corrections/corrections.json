@@ -621,6 +621,30 @@
       },
       "timestamp": "2025-12-04T12:53:28.162067",
       "fields_changed": []
+    },
+    "2cc70896c102ac20af45f543682ddd6b_20251209_140105": {
+      "file_path": "inbox/001417_CIRCEO_PESCA_S.p.A._20251209_140013.pdf",
+      "file_name": "001417_CIRCEO_PESCA_S.p.A._20251209_140013.pdf",
+      "file_hash": "2cc70896c102ac20af45f543682ddd6b",
+      "original_data": {
+        "data": "2025-07-30",
+        "mittente": "CIRCEO PESCA S.p.A.",
+        "destinatario": "COOP ALLEANZA 3.0 SOC.COOP.",
+        "numero_documento": "001417",
+        "totale_kg": 78.595
+      },
+      "corrected_data": {
+        "data": "2025-07-30",
+        "mittente": "CIRCEO PESCA S.p.A.",
+        "destinatario": "COOP ALLEANZA 3.0 SOC.COOP.",
+        "numero_documento": "R10/00004417",
+        "totale_kg": 78.6
+      },
+      "timestamp": "2025-12-09T14:01:05.280938",
+      "fields_changed": [
+        "numero_documento",
+        "totale_kg"
+      ]
     }
   },
   "learning_patterns": {
@@ -713,6 +737,16 @@
         "5daeaafd259ef7d1d40def1b65acce4f"
       ],
       "mittente_pattern": "ITTICA GESIA SRL"
+    },
+    "numero_documento_001417": {
+      "field": "numero_documento",
+      "original_pattern": "001417",
+      "corrected_value": "R10/00004417",
+      "count": 1,
+      "files": [
+        "2cc70896c102ac20af45f543682ddd6b"
+      ],
+      "mittente_pattern": "CIRCEO PESCA S.p.A."
     }
   },
   "auto_rules_created": []

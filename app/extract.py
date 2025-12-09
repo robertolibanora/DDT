@@ -23,6 +23,7 @@ from app.models import DDTData
 from app.utils import normalize_date, normalize_float, normalize_text, clean_company_name
 from app.rules.rules import detect_rule, build_prompt_additions, reload_rules
 from app.corrections import apply_learning_suggestions
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -313,12 +314,68 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
         except Exception as e:
             logger.warning(f"Errore applicazione suggerimenti apprendimento: {e}")
         
+        # Controllo preventivo: verifica che mittente e destinatario non siano identici
+        mittente = normalized_data.get("mittente", "").strip()
+        destinatario = normalized_data.get("destinatario", "").strip()
+        
+        if mittente.lower() == destinatario.lower():
+            if mittente == "Non specificato" or not mittente:
+                error_msg = (
+                    f"Impossibile estrarre mittente e destinatario dal PDF. "
+                    f"Entrambi i campi risultano vuoti o non specificati dopo la normalizzazione. "
+                    f"Verifica che il PDF contenga informazioni chiare per mittente e destinatario."
+                )
+            else:
+                error_msg = (
+                    f"Mittente e destinatario risultano identici dopo la normalizzazione: '{mittente}'. "
+                    f"Questo potrebbe indicare un errore nell'estrazione dei dati dal PDF. "
+                    f"Verifica che il PDF contenga informazioni distinte per mittente e destinatario."
+                )
+            logger.error(error_msg)
+            logger.error(f"Dati normalizzati completi: {normalized_data}")
+            logger.error(f"Dati grezzi estratti: {raw_data}")
+            raise ValueError(error_msg)
+        
         # Valida usando Pydantic
         try:
             ddt_data = DDTData(**normalized_data)
             result = ddt_data.model_dump()
             logger.info(f"Dati validati con successo: {result}")
             return result
+        except ValidationError as e:
+            # Estrai un messaggio più chiaro dagli errori di validazione Pydantic
+            error_messages = []
+            for error in e.errors():
+                field = error.get("loc", [])
+                field_name = " -> ".join(str(f) for f in field) if field else "campo sconosciuto"
+                error_type = error.get("type", "unknown")
+                error_msg = error.get("msg", "Errore di validazione")
+                
+                # Messaggi personalizzati per errori comuni
+                if "Mittente e destinatario non possono essere identici" in str(error_msg):
+                    mittente_val = normalized_data.get("mittente", "N/A")
+                    error_messages.append(
+                        f"Mittente e destinatario risultano identici: '{mittente_val}'. "
+                        f"Verifica che il PDF contenga informazioni distinte per mittente e destinatario."
+                    )
+                elif error_type == "value_error":
+                    error_messages.append(f"{field_name}: {error_msg}")
+                else:
+                    error_messages.append(f"{field_name}: {error_msg}")
+            
+            error_str = "; ".join(error_messages) if error_messages else str(e)
+            logger.error(f"Errore validazione Pydantic: {e}")
+            logger.error(f"Dati normalizzati: {normalized_data}")
+            raise ValueError(f"Dati estratti non validi: {error_str}") from e
+        except ValueError as e:
+            # Se l'errore è già stato gestito sopra (mittente/destinatario identici), rilancia così com'è
+            error_str = str(e)
+            if "Mittente e destinatario risultano identici" in error_str:
+                raise
+            # Altrimenti, fornisci un messaggio più chiaro
+            logger.error(f"Errore validazione dati: {e}")
+            logger.error(f"Dati normalizzati: {normalized_data}")
+            raise ValueError(f"Dati estratti non validi: {str(e)}") from e
         except Exception as e:
             logger.error(f"Errore validazione dati: {e}")
             logger.error(f"Dati normalizzati: {normalized_data}")
@@ -326,6 +383,9 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
         
     except FileNotFoundError:
         raise FileNotFoundError(f"File PDF non trovato: {file_path}")
+    except ValueError:
+        # Rilancia ValueError così com'è (già gestito con messaggi chiari)
+        raise
     except Exception as e:
         logger.error(f"Errore generico durante estrazione: {e}", exc_info=True)
         raise ValueError(f"Errore durante l'elaborazione del PDF: {str(e)}") from e

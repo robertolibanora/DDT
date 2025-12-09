@@ -100,6 +100,22 @@ header::before {
     50% { transform: translate(-20px, -20px) rotate(180deg); }
 }
 
+.header-logo-title {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    position: relative;
+    z-index: 1;
+}
+
+.header-logo {
+    height: 32px;
+    width: auto;
+    object-fit: contain;
+    opacity: 0.8;
+    filter: drop-shadow(1px 1px 2px var(--ombra-profonda));
+}
+
 header h1 {
     color: var(--schiuma-bianca);
     margin-bottom: var(--spacing-sm);
@@ -109,6 +125,7 @@ header h1 {
     z-index: 1;
     font-weight: 700;
     letter-spacing: -0.02em;
+    margin: 0; /* Rimuove il margin-bottom quando è dentro header-logo-title */
 }
 
 nav {
@@ -1248,6 +1265,10 @@ footer {
     header {
         padding: var(--spacing-lg);
         border-radius: var(--radius-lg);
+    }
+    
+    .header-logo {
+        height: 28px;
     }
     
     header h1 {

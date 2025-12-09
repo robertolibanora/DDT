@@ -45,12 +45,11 @@
                 <th>Destinatario</th>
                 <th>Numero Doc.</th>
                 <th>Kg</th>
-                <th>Azioni</th>
             </tr>
         </thead>
         <tbody id="table-body">
             <tr>
-                <td colspan="6" class="loading">
+                <td colspan="5" class="loading">
                     <div class="spinner"></div> Caricamento dati...
                 </td>
             </tr>
@@ -135,7 +134,7 @@
             if (rows.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="6" class="empty-state">
+                        <td colspan="5" class="empty-state">
                             Nessun DDT presente. Carica un DDT per iniziare.
                         </td>
                     </tr>
@@ -159,7 +158,6 @@
                         <td>${escapeHtml(row.destinatario || '-')}</td>
                         <td>${numeroDoc}</td>
                         <td>${kg}</td>
-                        <td>-</td>
                     </tr>
                 `;
             }).join('');
