@@ -5,6 +5,7 @@ Carica, salva e applica regole personalizzate per fornitori specifici
 import json
 import logging
 import os
+import threading
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 
@@ -12,71 +13,80 @@ logger = logging.getLogger(__name__)
 
 RULES_FILE = Path(__file__).parent / "rules.json"
 
-# Cache delle regole per performance
+# Cache delle regole per performance (thread-safe)
 _rules_cache: Optional[Dict[str, Any]] = None
+_rules_lock = threading.Lock()
 
 
 def _load_rules() -> Dict[str, Any]:
     """
-    Carica le regole dal file JSON
+    Carica le regole dal file JSON (thread-safe)
     
     Returns:
         Dizionario con tutte le regole
     """
     global _rules_cache
     
+    # Double-check locking pattern per thread-safety
     if _rules_cache is not None:
         return _rules_cache
     
-    if not RULES_FILE.exists():
-        logger.info(f"File regole non trovato, creo {RULES_FILE} vuoto")
-        _rules_cache = {}
-        _save_rules(_rules_cache)
-        return _rules_cache
-    
-    try:
-        with open(RULES_FILE, 'r', encoding='utf-8') as f:
-            _rules_cache = json.load(f)
-        logger.info(f"Caricate {len(_rules_cache)} regole da {RULES_FILE}")
-        return _rules_cache
-    except json.JSONDecodeError as e:
-        logger.error(f"Errore parsing JSON regole: {e}")
-        _rules_cache = {}
-        return _rules_cache
-    except Exception as e:
-        logger.error(f"Errore caricamento regole: {e}", exc_info=True)
-        _rules_cache = {}
-        return _rules_cache
+    with _rules_lock:
+        # Verifica di nuovo dentro il lock (double-check)
+        if _rules_cache is not None:
+            return _rules_cache
+        
+        if not RULES_FILE.exists():
+            logger.info(f"File regole non trovato, creo {RULES_FILE} vuoto")
+            _rules_cache = {}
+            _save_rules(_rules_cache)
+            return _rules_cache
+        
+        try:
+            with open(RULES_FILE, 'r', encoding='utf-8') as f:
+                _rules_cache = json.load(f)
+            logger.info(f"Caricate {len(_rules_cache)} regole da {RULES_FILE}")
+            return _rules_cache
+        except json.JSONDecodeError as e:
+            logger.error(f"Errore parsing JSON regole: {e}")
+            _rules_cache = {}
+            return _rules_cache
+        except Exception as e:
+            logger.error(f"Errore caricamento regole: {e}", exc_info=True)
+            _rules_cache = {}
+            return _rules_cache
 
 
 def _save_rules(rules: Dict[str, Any]) -> None:
     """
-    Salva le regole nel file JSON
+    Salva le regole nel file JSON (thread-safe)
     
     Args:
         rules: Dizionario con tutte le regole
     """
     global _rules_cache
     
-    try:
-        # Crea la directory se non esiste
-        RULES_FILE.parent.mkdir(parents=True, exist_ok=True)
-        
-        with open(RULES_FILE, 'w', encoding='utf-8') as f:
-            json.dump(rules, f, indent=2, ensure_ascii=False)
-        
-        # Aggiorna la cache
-        _rules_cache = rules.copy()
-        logger.info(f"Regole salvate in {RULES_FILE}")
-    except Exception as e:
-        logger.error(f"Errore salvataggio regole: {e}", exc_info=True)
-        raise
+    with _rules_lock:
+        try:
+            # Crea la directory se non esiste
+            RULES_FILE.parent.mkdir(parents=True, exist_ok=True)
+            
+            with open(RULES_FILE, 'w', encoding='utf-8') as f:
+                json.dump(rules, f, indent=2, ensure_ascii=False)
+            
+            # Aggiorna la cache
+            _rules_cache = rules.copy()
+            logger.info(f"Regole salvate in {RULES_FILE}")
+        except Exception as e:
+            logger.error(f"Errore salvataggio regole: {e}", exc_info=True)
+            raise
 
 
 def reload_rules() -> None:
-    """Ricarica le regole dal file (forza refresh cache)"""
+    """Ricarica le regole dal file (forza refresh cache, thread-safe)"""
     global _rules_cache
-    _rules_cache = None
+    with _rules_lock:
+        _rules_cache = None
     _load_rules()
 
 

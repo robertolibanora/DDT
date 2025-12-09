@@ -455,9 +455,12 @@ async def get_data(request: Request, auth: bool = Depends(check_auth)):
 async def get_watchdog_queue(request: Request, auth: bool = Depends(check_auth)):
     """Endpoint per ottenere gli elementi in coda dal watchdog - garantisce base64 per rete locale"""
     try:
-        from app.watchdog_queue import get_pending_items
+        from app.watchdog_queue import get_pending_items, cleanup_old_items
         from app.config import INBOX_DIR
         import base64
+        
+        # Pulisci elementi vecchi periodicamente (ogni volta che si accede alla coda)
+        cleanup_old_items()
         
         items = get_pending_items()
         

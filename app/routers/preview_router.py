@@ -13,6 +13,7 @@ from app.dependencies import require_authentication
 from app.corrections import save_correction, get_file_hash
 from app.excel import update_or_append_to_excel
 from app.config import INBOX_DIR
+from app.watchdog_queue import get_all_items, mark_as_processed
 
 # Directory temporanea per i file di anteprima
 TEMP_PREVIEW_DIR = Path("temp/preview")
@@ -92,6 +93,17 @@ async def save_preview(
         # Salva o aggiorna nel file Excel (evita duplicati)
         was_updated = update_or_append_to_excel(corrected_data)
         action = "aggiornato" if was_updated else "salvato"
+        
+        # Se questo file viene dalla coda watchdog, marcalo come processato
+        try:
+            queue_items = get_all_items()
+            for item in queue_items:
+                if item.get("file_hash") == file_hash and not item.get("processed", False):
+                    mark_as_processed(item.get("id"))
+                    logger.info(f"Elemento coda watchdog marcato come processato: {item.get('id')}")
+                    break
+        except Exception as e:
+            logger.warning(f"Errore marcatura elemento coda watchdog: {e}")
         
         # Rimuovi il file temporaneo dopo il salvataggio (se è nella cartella preview)
         preview_file = TEMP_PREVIEW_DIR / f"{file_hash}.pdf"

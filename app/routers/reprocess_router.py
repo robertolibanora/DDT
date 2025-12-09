@@ -4,12 +4,12 @@ Router FastAPI per reprocessing DDT
 import os
 import logging
 from pathlib import Path
-from fastapi import APIRouter, HTTPException, Depends, Request, Body, Body
+from fastapi import APIRouter, HTTPException, Depends, Request, Body
 from typing import Dict, Any, Optional
 from pydantic import BaseModel
 
 from app.extract import extract_from_pdf
-from app.excel import read_excel_as_dict, append_to_excel
+from app.excel import read_excel_as_dict, update_or_append_to_excel
 from app.config import INBOX_DIR
 from app.dependencies import require_authentication
 
@@ -83,17 +83,17 @@ async def reprocess_ddt(numero_documento: str, http_request: Request, request_da
                     f"differisce da quello richiesto '{numero_documento}'"
                 )
             
-            # Aggiorna il file Excel (sovrascrive la riga esistente se presente)
-            # Per semplicità, aggiungiamo una nuova riga
-            # In futuro si potrebbe implementare un update specifico
-            append_to_excel(extracted_data)
+            # Aggiorna il file Excel (sovrascrive la riga esistente se presente, altrimenti aggiunge)
+            was_updated = update_or_append_to_excel(extracted_data)
+            action = "aggiornato" if was_updated else "aggiunto"
             
-            logger.info(f"DDT '{numero_documento}' riprocessato con successo")
+            logger.info(f"DDT '{numero_documento}' riprocessato con successo ({action})")
             
             return {
                 "success": True,
-                "message": f"DDT '{numero_documento}' riprocessato con successo",
-                "data": extracted_data
+                "message": f"DDT '{numero_documento}' riprocessato con successo ({action})",
+                "data": extracted_data,
+                "updated": was_updated
             }
             
         except ValueError as e:
@@ -135,15 +135,17 @@ async def reprocess_by_file(http_request: Request, request_data: Dict[str, Any],
         extracted_data = extract_from_pdf(file_path)
         numero_documento = extracted_data.get("numero_documento", "N/A")
         
-        # Aggiorna il file Excel
-        append_to_excel(extracted_data)
+        # Aggiorna il file Excel (sovrascrive la riga esistente se presente, altrimenti aggiunge)
+        was_updated = update_or_append_to_excel(extracted_data)
+        action = "aggiornato" if was_updated else "aggiunto"
         
-        logger.info(f"DDT '{numero_documento}' riprocessato con successo")
+        logger.info(f"DDT '{numero_documento}' riprocessato con successo ({action})")
         
         return {
             "success": True,
-            "message": f"DDT '{numero_documento}' riprocessato con successo",
-            "data": extracted_data
+            "message": f"DDT '{numero_documento}' riprocessato con successo ({action})",
+            "data": extracted_data,
+            "updated": was_updated
         }
         
     except ValueError as e:

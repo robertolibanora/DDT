@@ -7,7 +7,7 @@ import logging
 import base64
 from pathlib import Path
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timedelta
 import threading
 
 logger = logging.getLogger(__name__)
@@ -19,6 +19,10 @@ _queue_lock = threading.Lock()
 _watchdog_queue: List[Dict[str, Any]] = []
 
 QUEUE_FILE = Path("app/watchdog_queue.json")
+
+# Configurazione pulizia automatica
+MAX_QUEUE_SIZE = 1000  # Massimo numero di elementi in coda
+CLEANUP_DAYS = 7  # Rimuovi elementi processati più vecchi di 7 giorni
 
 
 def _load_queue() -> List[Dict[str, Any]]:
@@ -177,6 +181,70 @@ def get_item_by_id(queue_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-# Carica la coda all'avvio
+def cleanup_old_items() -> int:
+    """
+    Rimuove elementi vecchi dalla coda per evitare crescita indefinita
+    
+    - Rimuove elementi processati più vecchi di CLEANUP_DAYS giorni
+    - Se la coda supera MAX_QUEUE_SIZE, rimuove i più vecchi (processati o meno)
+    
+    Returns:
+        Numero di elementi rimossi
+    """
+    global _watchdog_queue
+    
+    with _queue_lock:
+        _load_queue()
+        initial_count = len(_watchdog_queue)
+        
+        if initial_count == 0:
+            return 0
+        
+        cutoff_date = datetime.now() - timedelta(days=CLEANUP_DAYS)
+        
+        # Filtra elementi da mantenere
+        kept_items = []
+        for item in _watchdog_queue:
+            timestamp_str = item.get("timestamp", "")
+            if not timestamp_str:
+                # Se non ha timestamp, mantienilo (vecchio formato)
+                kept_items.append(item)
+                continue
+            
+            try:
+                item_date = datetime.fromisoformat(timestamp_str)
+                
+                # Mantieni se:
+                # 1. Non è processato, OPPURE
+                # 2. È processato ma è più recente di CLEANUP_DAYS giorni
+                is_processed = item.get("processed", False)
+                if not is_processed or item_date > cutoff_date:
+                    kept_items.append(item)
+            except (ValueError, TypeError):
+                # Se il timestamp non è valido, mantieni l'elemento
+                kept_items.append(item)
+        
+        # Se ancora troppo grande, rimuovi i più vecchi (indipendentemente da processed)
+        if len(kept_items) > MAX_QUEUE_SIZE:
+            # Ordina per timestamp (più recenti prima)
+            kept_items.sort(
+                key=lambda x: datetime.fromisoformat(x.get("timestamp", "2000-01-01")) 
+                if x.get("timestamp") else datetime.min,
+                reverse=True
+            )
+            # Mantieni solo i più recenti
+            kept_items = kept_items[:MAX_QUEUE_SIZE]
+        
+        removed_count = initial_count - len(kept_items)
+        if removed_count > 0:
+            _watchdog_queue = kept_items
+            _save_queue()
+            logger.info(f"Pulizia coda watchdog: rimossi {removed_count} elementi vecchi")
+        
+        return removed_count
+
+
+# Carica la coda all'avvio e pulisci elementi vecchi
 _load_queue()
+cleanup_old_items()
 
