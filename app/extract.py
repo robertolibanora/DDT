@@ -23,6 +23,8 @@ from app.models import DDTData
 from app.utils import normalize_date, normalize_float, normalize_text, clean_company_name
 from app.rules.rules import detect_rule, build_prompt_additions, reload_rules
 from app.corrections import apply_learning_suggestions
+from app.text_extraction.orchestrator import extract_text_pipeline, extract_text_for_rule_detection
+from app.text_extraction.decision import TextExtractionResult
 from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
@@ -88,6 +90,7 @@ IMPORTANTE: Restituisci SOLO il JSON, senza commenti, senza spiegazioni."""
 def extract_text_from_pdf(file_path: str) -> str:
     """
     Estrae il testo grezzo da un PDF per il rilevamento delle regole
+    (Funzione legacy mantenuta per compatibilità)
     
     Args:
         file_path: Percorso del file PDF
@@ -95,59 +98,50 @@ def extract_text_from_pdf(file_path: str) -> str:
     Returns:
         Testo estratto dal PDF
     """
-    try:
-        import pdfplumber
-        
-        text_parts = []
-        with pdfplumber.open(file_path) as pdf:
-            # Estrai testo da tutte le pagine (limite ragionevole: prime 5 pagine)
-            max_pages = min(5, len(pdf.pages))
-            for i in range(max_pages):
-                page = pdf.pages[i]
-                page_text = page.extract_text()
-                if page_text:
-                    text_parts.append(page_text)
-        
-        return "\n".join(text_parts)
-    except ImportError:
-        logger.warning("pdfplumber non installato, uso fallback OCR")
-        # Fallback: prova a usare pdf2image + OCR se disponibile
-        try:
-            from pdf2image import convert_from_bytes
-            from io import BytesIO
-            
-            with open(file_path, "rb") as f:
-                pdf_bytes = f.read()
-            
-            images = convert_from_bytes(pdf_bytes, first_page=1, last_page=1, dpi=200)
-            if images:
-                # Per ora restituiamo una stringa vuota se non abbiamo OCR
-                # In futuro si potrebbe integrare pytesseract
-                return ""
-        except Exception as e:
-            logger.warning(f"Errore estrazione testo fallback: {e}")
-            return ""
-    except Exception as e:
-        logger.warning(f"Errore estrazione testo PDF: {e}")
-        return ""
+    return extract_text_for_rule_detection(file_path)
 
 
-def build_dynamic_prompt(rule_name: Optional[str] = None) -> str:
+def build_dynamic_prompt(rule_name: Optional[str] = None, extracted_text: Optional[str] = None) -> str:
     """
-    Costruisce il prompt dinamico con eventuali regole aggiuntive
+    Costruisce il prompt dinamico con eventuali regole aggiuntive e grounding del testo
     
     Args:
         rule_name: Nome della regola da applicare (opzionale)
+        extracted_text: Testo estratto automaticamente per grounding (opzionale)
         
     Returns:
-        Prompt completo con eventuali aggiunte
+        Prompt completo con eventuali aggiunte e grounding
     """
     prompt = BASE_PROMPT
     
+    # Aggiungi regole specifiche se presenti
     if rule_name:
         additions = build_prompt_additions(rule_name)
         if additions:
             prompt += additions
+    
+    # Aggiungi grounding del testo estratto se disponibile e affidabile
+    if extracted_text and extracted_text.strip():
+        # Limita la lunghezza del testo per evitare prompt troppo lunghi
+        text_preview = extracted_text[:2000] if len(extracted_text) > 2000 else extracted_text
+        if len(extracted_text) > 2000:
+            text_preview += "\n... (testo troncato)"
+        
+        prompt += f"""
+
+---
+📄 TESTO ESTRATTO AUTOMATICAMENTE DAL PDF (RIFERIMENTO):
+<<<
+{text_preview}
+>>>
+
+⚠️ IMPORTANTE:
+- Questo testo è stato estratto automaticamente e potrebbe essere incompleto o impreciso
+- USA SEMPRE la validazione visiva del documento per confermare i dati
+- Il testo serve come RIFERIMENTO per migliorare la precisione, non come fonte unica
+- Se ci sono discrepanze tra testo e immagine, privilegia SEMPRE l'immagine
+- Verifica attentamente numeri, date e nomi aziende confrontandoli con il documento visivo
+"""
     
     return prompt
 
@@ -179,8 +173,22 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
         
         logger.info(f"Elaborazione PDF: {file_path} ({len(pdf_bytes)} bytes)")
         
-        # Estrai testo per rilevamento regole
-        pdf_text = extract_text_from_pdf(file_path)
+        # Estrai testo usando la nuova pipeline intelligente
+        text_extraction_result = extract_text_pipeline(file_path, max_pages=5, enable_ocr=False)
+        pdf_text = text_extraction_result.text if text_extraction_result else ""
+        
+        # Log dettagli estrazione testo
+        if text_extraction_result:
+            logger.info(
+                f"Estrazione testo: metodo={text_extraction_result.method}, "
+                f"affidabile={text_extraction_result.is_reliable}, "
+                f"confidence={text_extraction_result.confidence_score:.2f}, "
+                f"motivo={text_extraction_result.reason}"
+            )
+        else:
+            logger.warning("Estrazione testo fallita completamente")
+        
+        # Rilevamento regole usando il testo estratto
         rule_name = detect_rule(pdf_text) if pdf_text else None
         
         if rule_name:
@@ -188,8 +196,9 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
         else:
             logger.info("Nessuna regola specifica rilevata, uso prompt standard")
         
-        # Costruisci prompt dinamico
-        dynamic_prompt = build_dynamic_prompt(rule_name)
+        # Costruisci prompt dinamico con grounding del testo (se affidabile)
+        extracted_text_for_grounding = pdf_text if (text_extraction_result and text_extraction_result.is_reliable) else None
+        dynamic_prompt = build_dynamic_prompt(rule_name, extracted_text=extracted_text_for_grounding)
         
         # Converti PDF in immagini (OpenAI Vision richiede immagini, non PDF)
         # Prova prima PyMuPDF (non richiede Poppler), poi pdf2image come fallback
@@ -279,7 +288,16 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
                     {
                         "role": "user",
                         "content": [
-                            {"type": "text", "text": "Estrai i dati dal DDT nell'immagine seguente. Sii preciso e accurato."},
+                            {
+                                "type": "text",
+                                "text": (
+                                    "Estrai i dati dal DDT nell'immagine seguente. "
+                                    "Sii preciso e accurato. "
+                                    + ("Il prompt include testo estratto automaticamente come riferimento - "
+                                       "usa sempre la validazione visiva per confermare i dati." 
+                                       if extracted_text_for_grounding else "")
+                                )
+                            },
                             {"type": "image_url", "image_url": {"url": f"data:{image_format};base64,{img_b64}"}}
                         ],
                     },

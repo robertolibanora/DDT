@@ -12,3 +12,5 @@ pdf2image
 Pillow
 pdfplumber
 itsdangerous
+# OCR fallback (opzionale - richiede anche tesseract installato nel sistema)
+# pytesseract
