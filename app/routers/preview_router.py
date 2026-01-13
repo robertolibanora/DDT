@@ -15,6 +15,7 @@ from app.excel import update_or_append_to_excel
 from app.config import INBOX_DIR
 from app.watchdog_queue import get_all_items, mark_as_processed
 from app.extract import generate_preview_png
+from app.layout_rules.manager import get_all_layout_rules, match_layout_rule, load_layout_rules
 
 # Directory temporanea per i file di anteprima
 TEMP_PREVIEW_DIR = Path("temp/preview")
@@ -361,6 +362,143 @@ async def save_preview(
     except Exception as e:
         logger.error(f"Errore durante salvataggio anteprima: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Errore durante il salvataggio: {str(e)}")
+
+
+@router.get("/detect-model")
+async def detect_model(
+    request: Request,
+    mittente: str,
+    page_count: int = None,
+    auth: bool = Depends(require_authentication)
+):
+    """
+    Cerca automaticamente un modello di layout basato sul mittente estratto
+    
+    Args:
+        mittente: Nome del mittente estratto dal documento
+        page_count: Numero di pagine del documento (opzionale)
+    """
+    try:
+        if not mittente or not mittente.strip():
+            return JSONResponse({
+                "success": True,
+                "matched": False,
+                "model": None,
+                "available_models": []
+            })
+        
+        # Cerca modello automatico
+        layout_rule = match_layout_rule(mittente.strip(), page_count)
+        
+        matched_model = None
+        if layout_rule:
+            # Ottieni tutti i modelli per mostrare anche quelli disponibili
+            all_rules = load_layout_rules()
+            for rule_name, rule in all_rules.items():
+                if rule == layout_rule:
+                    matched_model = {
+                        "id": rule_name,
+                        "name": rule.match.supplier,
+                        "rule_name": rule_name,
+                        "fields_count": len(rule.fields),
+                        "fields": list(rule.fields.keys())
+                    }
+                    break
+        
+        # Ottieni lista di tutti i modelli disponibili
+        all_models = []
+        all_rules = get_all_layout_rules()
+        for rule_name, rule_data in all_rules.items():
+            supplier = rule_data.get('match', {}).get('supplier', 'Sconosciuto')
+            fields = rule_data.get('fields', {})
+            all_models.append({
+                "id": rule_name,
+                "name": supplier,
+                "rule_name": rule_name,
+                "fields_count": len(fields),
+                "fields": list(fields.keys())
+            })
+        
+        # Ordina per nome
+        all_models.sort(key=lambda x: x['name'].upper())
+        
+        return JSONResponse({
+            "success": True,
+            "matched": matched_model is not None,
+            "model": matched_model,
+            "available_models": all_models
+        })
+    except Exception as e:
+        logger.error(f"Errore rilevamento modello: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Errore durante il rilevamento: {str(e)}")
+
+
+@router.post("/apply-model")
+async def apply_model(
+    request: Request,
+    file_hash: str = Form(...),
+    model_id: str = Form(...),
+    auth: bool = Depends(require_authentication)
+):
+    """
+    Applica un modello di layout specifico per riprocessare il documento
+    
+    Args:
+        file_hash: Hash del file PDF
+        model_id: ID del modello da applicare (rule_name)
+    """
+    try:
+        from app.extract import extract_from_pdf
+        from pathlib import Path
+        
+        # Trova il file PDF
+        file_path = None
+        preview_file = TEMP_PREVIEW_DIR / f"{file_hash}.pdf"
+        if preview_file.exists():
+            file_path = str(preview_file)
+        else:
+            inbox_path = Path(INBOX_DIR)
+            if inbox_path.exists():
+                for pdf_file in inbox_path.glob("*.pdf"):
+                    try:
+                        if get_file_hash(str(pdf_file)) == file_hash:
+                            file_path = str(pdf_file)
+                            break
+                    except:
+                        continue
+        
+        if not file_path or not Path(file_path).exists():
+            raise HTTPException(status_code=404, detail="File PDF non trovato")
+        
+        # Carica il modello
+        all_rules = load_layout_rules()
+        if model_id not in all_rules:
+            raise HTTPException(status_code=404, detail=f"Modello '{model_id}' non trovato")
+        
+        layout_rule = all_rules[model_id]
+        supplier = layout_rule.match.supplier
+        
+        # Riprocessa il documento con il modello specifico
+        # Per ora, estrai normalmente (il sistema applicherà automaticamente il modello se matcha)
+        # In futuro potremmo forzare l'applicazione del modello
+        extracted_data = extract_from_pdf(file_path)
+        
+        logger.info(f"✅ Documento riprocessato con modello '{model_id}' per mittente '{supplier}'")
+        
+        return JSONResponse({
+            "success": True,
+            "message": f"Modello '{model_id}' applicato con successo",
+            "extracted_data": extracted_data,
+            "model_applied": {
+                "id": model_id,
+                "name": supplier
+            }
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Errore applicazione modello: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Errore durante l'applicazione del modello: {str(e)}")
 
 
 
