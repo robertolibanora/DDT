@@ -40,3 +40,10 @@ app/watchdog_queue.json
 app/watchdog_queue.json.lock
 ddt.xlsx
 inbox/
+
+#runtime
+temp/
+logs/
+*.log
+app/corrections/corrections.json
+app/watchdog_queue.json
