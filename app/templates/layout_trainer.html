@@ -14,6 +14,7 @@
     <div class="instructions">
         <h3>📖 Istruzioni</h3>
         <ul>
+            <li><strong>Carica un PDF</strong> oppure usa un documento dall'anteprima</li>
             <li><strong>Seleziona un campo</strong> dal menu a tendina</li>
             <li><strong>Disegna un rettangolo</strong> sull'immagine per indicare dove si trova quel campo</li>
             <li><strong>Clicca su un box</strong> per selezionarlo e modificarlo</li>
@@ -25,13 +26,39 @@
         <p><strong>⚠️ Importante:</strong> Le coordinate sono salvate in percentuale, quindi la regola funzionerà per documenti con lo stesso layout anche se di dimensioni diverse.</p>
     </div>
     
+    <div class="upload-section">
+        <h3>📤 Carica PDF</h3>
+        <form id="upload-form" enctype="multipart/form-data">
+            <div class="upload-form-group">
+                <label for="pdf-file-input">Seleziona un file DDT (PDF)</label>
+                <input 
+                    type="file" 
+                    id="pdf-file-input" 
+                    name="file" 
+                    accept="application/pdf"
+                >
+                <small class="form-help">Solo file PDF sono supportati. Massimo 10MB.</small>
+            </div>
+            <button type="submit" class="btn-upload" id="btn-upload-pdf">
+                <span id="upload-btn-text">📤 Carica e Genera Anteprima</span>
+                <span id="upload-btn-spinner" class="spinner hidden"></span>
+            </button>
+        </form>
+    </div>
+    
     <div class="layout-trainer-container">
         <div class="layout-canvas-section">
             <h3>📄 Anteprima Documento</h3>
-            <canvas id="layout-canvas"></canvas>
-            <p style="margin-top: 10px; color: #666; font-size: 12px;">
-                Disegna i box per indicare dove si trovano i campi nel documento
-            </p>
+            <div id="canvas-container" style="display: none;">
+                <canvas id="layout-canvas"></canvas>
+                <p style="margin-top: 10px; color: #666; font-size: 12px;">
+                    Disegna i box per indicare dove si trovano i campi nel documento
+                </p>
+            </div>
+            <div id="no-image-message" style="padding: 40px; text-align: center; color: #999; background: var(--sand-light); border-radius: 8px; border: 2px dashed var(--aqua-light);">
+                <p style="font-size: 1.1em; margin-bottom: 10px;">📄 Nessun documento caricato</p>
+                <p style="font-size: 0.9em;">Carica un PDF usando il form sopra oppure apri questa pagina dall'anteprima di un DDT</p>
+            </div>
         </div>
         
         <div class="layout-controls-section">
@@ -81,7 +108,94 @@
         let fileHash = null;
         let supplier = null;
         
-        // Carica immagine se fornita come parametro
+        function showMessage(text, type = 'info') {
+            const message = document.getElementById('message');
+            message.textContent = text;
+            message.className = `message ${type}`;
+            message.classList.remove('hidden');
+            
+            if (type === 'success' || type === 'error') {
+                setTimeout(() => {
+                    message.classList.add('hidden');
+                }, 5000);
+            }
+        }
+        
+        function loadImageFromUrl(url, hash) {
+            fileHash = hash;
+            imageUrl = url;
+            
+            // Mostra il canvas e nascondi il messaggio
+            document.getElementById('canvas-container').style.display = 'block';
+            document.getElementById('no-image-message').style.display = 'none';
+            
+            // Carica immagine
+            layoutTrainer.loadImage(imageUrl).then(() => {
+                console.log('Immagine caricata');
+                showMessage('✅ Immagine caricata con successo', 'success');
+            }).catch(err => {
+                console.error('Errore caricamento immagine:', err);
+                showMessage('Errore caricamento immagine', 'error');
+            });
+        }
+        
+        // Gestione upload file
+        const uploadForm = document.getElementById('upload-form');
+        const uploadBtn = document.getElementById('btn-upload-pdf');
+        const uploadBtnText = document.getElementById('upload-btn-text');
+        const uploadBtnSpinner = document.getElementById('upload-btn-spinner');
+        const fileInput = document.getElementById('pdf-file-input');
+        
+        uploadForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const file = fileInput.files[0];
+            if (!file) {
+                showMessage('⚠️ Seleziona un file PDF', 'error');
+                return;
+            }
+            
+            if (!file.name.toLowerCase().endsWith('.pdf')) {
+                showMessage('⚠️ Il file deve essere un PDF', 'error');
+                return;
+            }
+            
+            // Disabilita il pulsante e mostra spinner
+            uploadBtn.disabled = true;
+            uploadBtnText.textContent = '⏳ Caricamento in corso...';
+            uploadBtnSpinner.classList.remove('hidden');
+            
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+                
+                const response = await fetch('/api/layout/upload-preview', {
+                    method: 'POST',
+                    body: formData,
+                    credentials: 'include'
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    // Carica l'immagine nel canvas
+                    loadImageFromUrl(data.image_url, data.file_hash);
+                    showMessage(`✅ File caricato: ${data.file_name}`, 'success');
+                } else {
+                    showMessage(`❌ Errore: ${data.detail || 'Errore durante il caricamento'}`, 'error');
+                }
+            } catch (error) {
+                console.error('Errore upload:', error);
+                showMessage(`❌ Errore durante il caricamento: ${error.message}`, 'error');
+            } finally {
+                // Riabilita il pulsante
+                uploadBtn.disabled = false;
+                uploadBtnText.textContent = '📤 Carica e Genera Anteprima';
+                uploadBtnSpinner.classList.add('hidden');
+            }
+        });
+        
+        // Carica immagine se fornita come parametro URL
         const urlParams = new URLSearchParams(window.location.search);
         const hashParam = urlParams.get('hash');
         const supplierParam = urlParams.get('supplier');
@@ -101,27 +215,7 @@
             document.getElementById('rule-name-input').value = ruleName;
             
             // Carica immagine
-            layoutTrainer.loadImage(imageUrl).then(() => {
-                console.log('Immagine caricata');
-            }).catch(err => {
-                console.error('Errore caricamento immagine:', err);
-                showMessage('Errore caricamento immagine', 'error');
-            });
-        } else {
-            showMessage('⚠️ Nessun documento selezionato. Usa questa pagina dall\'anteprima di un DDT.', 'error');
-        }
-        
-        function showMessage(text, type = 'info') {
-            const message = document.getElementById('message');
-            message.textContent = text;
-            message.className = `message ${type}`;
-            message.classList.remove('hidden');
-            
-            if (type === 'success' || type === 'error') {
-                setTimeout(() => {
-                    message.classList.add('hidden');
-                }, 5000);
-            }
+            loadImageFromUrl(imageUrl, hashParam);
         }
         
         document.getElementById('btn-save-layout').addEventListener('click', async () => {

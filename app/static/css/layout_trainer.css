@@ -267,6 +267,110 @@
     border: 1px solid var(--aqua-light);
 }
 
+/* Sezione upload */
+.upload-section {
+    background: var(--white);
+    padding: 20px;
+    border-radius: 12px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 15px rgba(10, 38, 71, 0.1);
+    border: 2px solid var(--aqua-light);
+}
+
+.upload-section h3 {
+    margin-top: 0;
+    margin-bottom: 16px;
+    color: var(--blue-deep);
+    font-size: 1.2em;
+    font-weight: 700;
+}
+
+.upload-form-group {
+    margin-bottom: 16px;
+}
+
+.upload-form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 700;
+    color: var(--blue-deep);
+    font-size: 0.95em;
+}
+
+.upload-form-group input[type="file"] {
+    width: 100%;
+    padding: 12px;
+    border: 2px solid var(--aqua-light);
+    border-radius: 8px;
+    font-size: 16px;
+    background: var(--white);
+    color: var(--blue-deep);
+    font-family: inherit;
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+.upload-form-group input[type="file"]:focus {
+    outline: none;
+    border-color: var(--blue-sea);
+    box-shadow: 0 0 0 3px rgba(30, 111, 174, 0.1);
+}
+
+.form-help {
+    display: block;
+    margin-top: 6px;
+    font-size: 0.85em;
+    color: var(--blue-sea);
+    font-style: italic;
+}
+
+.btn-upload {
+    padding: 14px 20px;
+    border: none;
+    border-radius: 8px;
+    font-size: 1em;
+    cursor: pointer;
+    font-weight: 700;
+    transition: all 0.3s ease;
+    min-height: 48px;
+    box-shadow: 0 4px 12px rgba(10, 38, 71, 0.15);
+    background: linear-gradient(135deg, var(--blue-sea) 0%, var(--blue-deep) 100%);
+    color: var(--white);
+    width: 100%;
+}
+
+.btn-upload:hover:not(:disabled) {
+    background: linear-gradient(135deg, var(--blue-deep) 0%, var(--blue-sea) 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(30, 111, 174, 0.4);
+}
+
+.btn-upload:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none !important;
+}
+
+.spinner {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top-color: var(--white);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin-left: 8px;
+    vertical-align: middle;
+}
+
+.spinner.hidden {
+    display: none;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
 /* Messaggi */
 .message {
     padding: 14px 18px;

@@ -3,7 +3,10 @@ Router per la gestione delle regole di layout DDT
 Permette di salvare, caricare e gestire le regole di layout grafiche
 """
 import logging
-from fastapi import APIRouter, Request, HTTPException, Depends, Form
+import tempfile
+import os
+from pathlib import Path
+from fastapi import APIRouter, Request, HTTPException, Depends, Form, UploadFile, File
 from fastapi.responses import JSONResponse
 from typing import Optional, Dict, Any
 
@@ -15,6 +18,8 @@ from app.layout_rules.manager import (
     match_layout_rule,
     load_layout_rules
 )
+from app.corrections import get_file_hash
+from app.extract import generate_preview_png
 
 logger = logging.getLogger(__name__)
 
@@ -151,3 +156,66 @@ async def match_layout_rule_endpoint(
     except Exception as e:
         logger.error(f"Errore match layout rule: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Errore durante il matching: {str(e)}")
+
+
+@router.post("/upload-preview")
+async def upload_preview_for_layout(
+    request: Request,
+    file: UploadFile = File(...),
+    auth: bool = Depends(require_authentication)
+):
+    """
+    Carica un PDF e genera un'anteprima PNG per il layout trainer
+    
+    Args:
+        file: File PDF da caricare
+    """
+    if not file.filename.lower().endswith('.pdf'):
+        raise HTTPException(status_code=400, detail="Il file deve essere un PDF")
+    
+    tmp_path = None
+    
+    try:
+        # Salva temporaneamente il file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+            tmp_path = tmp_file.name
+            content = await file.read()
+            if not content:
+                raise HTTPException(status_code=400, detail="Il file è vuoto")
+            
+            # Controlla dimensione massima (10MB)
+            max_size = 10 * 1024 * 1024  # 10MB
+            if len(content) > max_size:
+                raise HTTPException(status_code=400, detail=f"Il file è troppo grande. Massimo 10MB.")
+            
+            tmp_file.write(content)
+        
+        logger.info(f"Upload file per layout trainer: {file.filename} ({len(content)} bytes)")
+        
+        # Calcola hash del file
+        file_hash = get_file_hash(tmp_path)
+        
+        # Genera PNG di anteprima
+        try:
+            preview_path = generate_preview_png(tmp_path, file_hash)
+            if preview_path and os.path.exists(preview_path):
+                logger.info(f"✅ PNG anteprima generata: {preview_path}")
+                # Restituisci l'URL dell'immagine e l'hash
+                return JSONResponse({
+                    "success": True,
+                    "file_hash": file_hash,
+                    "image_url": f"/preview/image/{file_hash}",
+                    "file_name": file.filename
+                })
+            else:
+                raise HTTPException(status_code=500, detail="Impossibile generare l'anteprima PNG")
+        except Exception as e:
+            logger.error(f"Errore generazione PNG anteprima: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Errore durante la generazione dell'anteprima: {str(e)}")
+    finally:
+        # Elimina il file temporaneo
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception as e:
+                logger.warning(f"Impossibile eliminare file temporaneo {tmp_path}: {e}")
