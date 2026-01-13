@@ -233,7 +233,13 @@
     border-radius: var(--radius-md);
     color: var(--oceano-profondo);
     font-size: 0.9em;
-    line-height: 1.5;
+    line-height: 1.6;
+    font-weight: 500;
+}
+
+.annotation-hint strong {
+    color: var(--oceano-profondo);
+    font-weight: 700;
 }
 
 .preview-pdf-container img {
@@ -244,6 +250,21 @@
     border-radius: var(--radius-sm);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
     object-fit: contain;
+    background: var(--white);
+    padding: 4px;
+}
+
+/* Migliora contrasto per testo sopra immagini PDF */
+.preview-image-wrapper::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+    background: linear-gradient(to bottom, rgba(255,255,255,0.1) 0%, transparent 20%, transparent 80%, rgba(255,255,255,0.1) 100%);
+    z-index: 1;
 }
 
 .preview-form-section .form-group {
@@ -332,6 +353,43 @@
 .preview-form-actions .btn-secondary:focus-visible {
     outline: 3px solid var(--acqua-azzurra);
     outline-offset: 2px;
+}
+
+/* Link layout trainer */
+.layout-trainer-link-container {
+    margin-top: 15px;
+    text-align: center;
+}
+
+#layout-trainer-link {
+    display: inline-block;
+    padding: 12px 20px;
+    background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
+    color: var(--white) !important;
+    text-decoration: none;
+    border-radius: 8px;
+    font-weight: 700;
+    font-size: 0.95em;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 12px rgba(34, 153, 84, 0.3);
+    border: 2px solid transparent;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#layout-trainer-link:hover {
+    background: linear-gradient(135deg, #229954 0%, #1e8449 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(34, 153, 84, 0.4);
+    text-decoration: none;
+}
+
+#layout-trainer-link:focus-visible {
+    outline: 3px solid #27ae60;
+    outline-offset: 2px;
+    border-color: #27ae60;
 }
 
 .preview-message {

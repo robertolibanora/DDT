@@ -1204,9 +1204,36 @@ main {
 /* Miglioramenti gerarchia visiva */
 h1, h2, h3, h4, h5, h6 {
     font-weight: 700;
-    line-height: 1.3;
+    line-height: 1.4;
     margin-bottom: var(--spacing-md);
     color: var(--oceano-profondo);
+}
+
+/* Assicura contrasto minimo per tutti i testi */
+h1, h2, h3, h4, h5, h6, p, li, span, div, label, td, th {
+    color: var(--oceano-profondo);
+}
+
+/* Testo su sfondo chiaro - sempre scuro */
+.card, .section, .preview-pdf-section, .preview-form-section {
+    color: var(--oceano-profondo);
+}
+
+/* Testo su sfondo scuro - sempre chiaro */
+header, nav, thead, .preview-modal-header {
+    color: var(--schiuma-bianca);
+}
+
+/* Link sempre visibili */
+a {
+    color: var(--acqua-azzurra);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+a:hover {
+    color: var(--oceano-profondo);
+    text-decoration-thickness: 2px;
 }
 
 h1 {

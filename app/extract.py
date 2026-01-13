@@ -25,6 +25,8 @@ from app.rules.rules import detect_rule, build_prompt_additions, reload_rules
 from app.corrections import apply_learning_suggestions, get_annotations_for_mittente
 from app.text_extraction.orchestrator import extract_text_pipeline, extract_text_for_rule_detection
 from app.text_extraction.decision import TextExtractionResult
+from app.layout_rules.manager import match_layout_rule
+from app.layout_rules.extractor import extract_with_layout_rule, normalize_extracted_box_data
 from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
@@ -202,9 +204,84 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
         
         logger.info(f"Elaborazione PDF: {file_path} ({len(pdf_bytes)} bytes)")
         
+        # Controlla numero di pagine per layout rule matching
+        try:
+            import fitz
+            doc_temp = fitz.open(stream=pdf_bytes, filetype="pdf")
+            page_count = len(doc_temp)
+            doc_temp.close()
+        except:
+            page_count = 1
+        
         # Estrai testo usando la nuova pipeline intelligente
         text_extraction_result = extract_text_pipeline(file_path, max_pages=5, enable_ocr=False)
         pdf_text = text_extraction_result.text if text_extraction_result else ""
+        
+        # Estrai un possibile mittente dal testo per layout rule matching
+        potential_mittente = None
+        if pdf_text:
+            try:
+                import re
+                mittente_patterns = [
+                    r'(?:Mittente|Da:|Fornitore|Spett\.le)\s*:?\s*([A-Z][A-Za-z0-9\s&\.]+)',
+                    r'([A-Z][A-Za-z0-9\s&\.]+)\s*(?:S\.r\.l\.|S\.p\.A\.|S\.A\.S\.|S\.A\.)',
+                ]
+                for pattern in mittente_patterns:
+                    match = re.search(pattern, pdf_text[:500], re.IGNORECASE)
+                    if match:
+                        potential_mittente = match.group(1).strip()
+                        break
+            except Exception as e:
+                logger.debug(f"Errore estrazione mittente preliminare: {e}")
+        
+        # Prova a matchare una layout rule
+        layout_rule = None
+        if potential_mittente:
+            layout_rule = match_layout_rule(potential_mittente, page_count)
+        
+        # Se trovata layout rule, prova estrazione con box
+        box_extracted_data = None
+        missing_fields = {'data', 'mittente', 'destinatario', 'numero_documento', 'totale_kg'}  # Default: tutti mancanti
+        if layout_rule:
+            logger.info(f"🎯 Layout rule trovata, provo estrazione con box per supplier: {potential_mittente}")
+            try:
+                box_raw_data = extract_with_layout_rule(file_path, layout_rule, potential_mittente, page_count)
+                if box_raw_data:
+                    box_extracted_data = normalize_extracted_box_data(box_raw_data)
+                    logger.info(f"✅ Dati estratti da box: {list(box_extracted_data.keys())}")
+                    
+                    # Verifica se abbiamo tutti i campi necessari
+                    required_fields = {'data', 'mittente', 'destinatario', 'numero_documento', 'totale_kg'}
+                    missing_fields = required_fields - set(box_extracted_data.keys())
+                    
+                    if not missing_fields:
+                        logger.info("✅ Tutti i campi estratti da box, salto chiamata AI")
+                    else:
+                        logger.info(f"⚠️ Campi mancanti da box: {missing_fields}, uso AI per completare")
+            except Exception as e:
+                logger.warning(f"⚠️ Errore estrazione con layout rule, fallback su OCR/AI: {e}")
+                box_extracted_data = None
+        
+        # Se abbiamo tutti i campi dai box, salta la chiamata AI
+        if box_extracted_data and not missing_fields:
+            # Valida i dati estratti dai box
+            try:
+                normalized_data = box_extracted_data
+                # Applica suggerimenti di apprendimento automatico
+                try:
+                    normalized_data = apply_learning_suggestions(normalized_data)
+                    logger.info("Suggerimenti di apprendimento applicati")
+                except Exception as e:
+                    logger.warning(f"Errore applicazione suggerimenti apprendimento: {e}")
+                
+                # Valida usando Pydantic
+                ddt_data = DDTData(**normalized_data)
+                result = ddt_data.model_dump()
+                logger.info(f"✅ Dati validati con successo (estrazione box): {result}")
+                return result
+            except ValidationError as e:
+                logger.warning(f"⚠️ Validazione fallita per dati box, fallback su AI: {e}")
+                box_extracted_data = None  # Forza fallback su AI
         
         # Log dettagli estrazione testo
         if text_extraction_result:
@@ -226,9 +303,9 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
             logger.info("Nessuna regola specifica rilevata, uso prompt standard")
         
         # Prova a ottenere annotazioni grafiche basate su un'estrazione preliminare del mittente
-        # (se disponibile dal testo estratto)
+        # (se disponibile dal testo estratto, solo se non abbiamo già dati dai box)
         annotations = None
-        if pdf_text:
+        if pdf_text and not box_extracted_data:
             # Estrai un possibile mittente dal testo per cercare annotazioni simili
             # Questo è un tentativo preliminare, le annotazioni verranno usate se disponibili
             try:
@@ -238,17 +315,17 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
                     r'(?:Mittente|Da:|Fornitore|Spett\.le)\s*:?\s*([A-Z][A-Za-z0-9\s&\.]+)',
                     r'([A-Z][A-Za-z0-9\s&\.]+)\s*(?:S\.r\.l\.|S\.p\.A\.|S\.A\.S\.|S\.A\.)',
                 ]
-                potential_mittente = None
+                potential_mittente_ann = None
                 for pattern in mittente_patterns:
                     match = re.search(pattern, pdf_text[:500], re.IGNORECASE)
                     if match:
-                        potential_mittente = match.group(1).strip()
+                        potential_mittente_ann = match.group(1).strip()
                         break
                 
-                if potential_mittente:
-                    annotations = get_annotations_for_mittente(potential_mittente)
+                if potential_mittente_ann:
+                    annotations = get_annotations_for_mittente(potential_mittente_ann)
                     if annotations:
-                        logger.info(f"Trovate annotazioni grafiche per mittente simile: {potential_mittente}")
+                        logger.info(f"Trovate annotazioni grafiche per mittente simile: {potential_mittente_ann}")
             except Exception as e:
                 logger.debug(f"Errore ricerca annotazioni preliminari: {e}")
         
@@ -380,6 +457,14 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
         
         # Normalizza i dati prima della validazione
         normalized_data = _normalize_extracted_data(raw_data)
+        
+        # Se abbiamo dati estratti dai box, merge con i dati AI (box hanno priorità)
+        if box_extracted_data:
+            logger.info("🔄 Merge dati box con dati AI")
+            for field, value in box_extracted_data.items():
+                if value and value != "Non specificato" and value != "1900-01-01" and value != 0.0:
+                    normalized_data[field] = value
+                    logger.info(f"📦 Campo da box (priorità): {field} = {value}")
         
         # Applica suggerimenti di apprendimento automatico
         try:

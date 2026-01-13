@@ -68,6 +68,11 @@ class PreviewModal {
                             <div class="annotation-hint">
                                 💡 <strong>Suggerimento:</strong> Seleziona un campo e disegna un riquadro sull'immagine per indicare dove si trova il dato. Questo aiuterà il modello a estrarre i dati con maggiore precisione.
                             </div>
+                            <div class="layout-trainer-link-container">
+                                <a id="layout-trainer-link" href="#">
+                                    ✏️ Insegna Layout di questo Documento
+                                </a>
+                            </div>
                         </div>
 
                         <!-- Form Dati -->
@@ -384,6 +389,14 @@ class PreviewModal {
         document.getElementById('preview-file-hash').value = fileHash || '';
         document.getElementById('preview-file-name').value = fileName || '';
         document.getElementById('preview-original-data').value = JSON.stringify(extractedData);
+        
+        // Aggiorna link layout trainer
+        const layoutTrainerLink = document.getElementById('layout-trainer-link');
+        if (layoutTrainerLink && fileHash) {
+            const supplier = extractedData?.mittente || '';
+            const url = `/layout-trainer?hash=${fileHash}${supplier ? '&supplier=' + encodeURIComponent(supplier) : ''}`;
+            layoutTrainerLink.href = url;
+        }
 
         // Popola i campi
         document.getElementById('preview-data').value = extractedData.data || '';

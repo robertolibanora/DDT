@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+
+{% block title %}Insegna Layout DDT{% endblock %}
+
+{% block header_title %}✏️ Insegna Layout DDT{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/layout_trainer.css">
+{% endblock %}
+
+{% block content %}
+    <div id="message" class="message hidden"></div>
+    
+    <div class="instructions">
+        <h3>📖 Istruzioni</h3>
+        <ul>
+            <li><strong>Seleziona un campo</strong> dal menu a tendina</li>
+            <li><strong>Disegna un rettangolo</strong> sull'immagine per indicare dove si trova quel campo</li>
+            <li><strong>Clicca su un box</strong> per selezionarlo e modificarlo</li>
+            <li><strong>Trascina gli angoli</strong> per ridimensionare un box selezionato</li>
+            <li><strong>Trascina il box</strong> per spostarlo</li>
+            <li><strong>Premi Canc</strong> per eliminare un box selezionato</li>
+            <li><strong>Inserisci il nome del fornitore</strong> e salva il layout</li>
+        </ul>
+        <p><strong>⚠️ Importante:</strong> Le coordinate sono salvate in percentuale, quindi la regola funzionerà per documenti con lo stesso layout anche se di dimensioni diverse.</p>
+    </div>
+    
+    <div class="layout-trainer-container">
+        <div class="layout-canvas-section">
+            <h3>📄 Anteprima Documento</h3>
+            <canvas id="layout-canvas"></canvas>
+            <p style="margin-top: 10px; color: #666; font-size: 12px;">
+                Disegna i box per indicare dove si trovano i campi nel documento
+            </p>
+        </div>
+        
+        <div class="layout-controls-section">
+            <h3>⚙️ Controlli</h3>
+            
+            <div class="supplier-input-group">
+                <label for="supplier-input">Fornitore (Mittente):</label>
+                <input type="text" id="supplier-input" placeholder="Es: FIORITAL" required>
+            </div>
+            
+            <div class="rule-name-input-group">
+                <label for="rule-name-input">Nome Regola:</label>
+                <input type="text" id="rule-name-input" placeholder="Es: FIORITAL_layout_v1" required>
+            </div>
+            
+            <div class="field-select-group">
+                <label for="field-select">Seleziona Campo:</label>
+                <select id="field-select">
+                    <option value="">-- Seleziona un campo --</option>
+                    <option value="mittente">Mittente</option>
+                    <option value="destinatario">Destinatario</option>
+                    <option value="data">Data</option>
+                    <option value="numero_documento">Numero Documento</option>
+                    <option value="totale_kg">Totale Kg</option>
+                </select>
+            </div>
+            
+            <div>
+                <h4>Box Definiti:</h4>
+                <ul id="boxes-list" class="boxes-list">
+                    <li style="color: #999; font-style: italic; padding: 12px; background: var(--sand-light); border-radius: 6px;">Nessun box definito</li>
+                </ul>
+            </div>
+            
+            <div class="action-buttons">
+                <button class="btn-save" id="btn-save-layout">💾 Salva Layout</button>
+                <button class="btn-clear" id="btn-clear-all">🗑️ Elimina Tutti i Box</button>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+    <script src="/static/js/layout_trainer.js"></script>
+    <script>
+        let imageUrl = null;
+        let fileHash = null;
+        let supplier = null;
+        
+        // Carica immagine se fornita come parametro
+        const urlParams = new URLSearchParams(window.location.search);
+        const hashParam = urlParams.get('hash');
+        const supplierParam = urlParams.get('supplier');
+        
+        if (hashParam) {
+            fileHash = hashParam;
+            imageUrl = `/preview/image/${hashParam}`;
+            supplier = supplierParam || '';
+            
+            // Precompila il campo fornitore se disponibile
+            if (supplier) {
+                document.getElementById('supplier-input').value = supplier;
+            }
+            
+            // Genera nome regola automatico
+            const ruleName = supplier ? `${supplier.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_layout_v1` : 'layout_v1';
+            document.getElementById('rule-name-input').value = ruleName;
+            
+            // Carica immagine
+            layoutTrainer.loadImage(imageUrl).then(() => {
+                console.log('Immagine caricata');
+            }).catch(err => {
+                console.error('Errore caricamento immagine:', err);
+                showMessage('Errore caricamento immagine', 'error');
+            });
+        } else {
+            showMessage('⚠️ Nessun documento selezionato. Usa questa pagina dall\'anteprima di un DDT.', 'error');
+        }
+        
+        function showMessage(text, type = 'info') {
+            const message = document.getElementById('message');
+            message.textContent = text;
+            message.className = `message ${type}`;
+            message.classList.remove('hidden');
+            
+            if (type === 'success' || type === 'error') {
+                setTimeout(() => {
+                    message.classList.add('hidden');
+                }, 5000);
+            }
+        }
+        
+        document.getElementById('btn-save-layout').addEventListener('click', async () => {
+            const supplierInput = document.getElementById('supplier-input').value.trim();
+            const ruleNameInput = document.getElementById('rule-name-input').value.trim();
+            
+            if (!supplierInput) {
+                showMessage('⚠️ Inserisci il nome del fornitore', 'error');
+                return;
+            }
+            
+            if (!ruleNameInput) {
+                showMessage('⚠️ Inserisci il nome della regola', 'error');
+                return;
+            }
+            
+            if (layoutTrainer.boxes.length === 0) {
+                showMessage('⚠️ Definisci almeno un box per salvare il layout', 'error');
+                return;
+            }
+            
+            const fields = layoutTrainer.getFieldsData();
+            
+            // Valida che non ci siano campi duplicati
+            const fieldNames = Object.keys(fields);
+            if (new Set(fieldNames).size !== fieldNames.length) {
+                showMessage('⚠️ Non puoi definire più box per lo stesso campo', 'error');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('rule_name', ruleNameInput);
+            formData.append('supplier', supplierInput);
+            formData.append('page_count', '1'); // Per ora solo pagina 1
+            formData.append('fields', JSON.stringify(fields));
+            
+            try {
+                const response = await fetch('/api/layout/rules/save', {
+                    method: 'POST',
+                    body: formData,
+                    credentials: 'include'
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    showMessage(`✅ Layout salvato con successo: ${ruleNameInput}`, 'success');
+                    setTimeout(() => {
+                        window.location.href = '/rules';
+                    }, 2000);
+                } else {
+                    showMessage(`❌ Errore: ${data.detail || 'Errore sconosciuto'}`, 'error');
+                }
+            } catch (error) {
+                console.error('Errore salvataggio layout:', error);
+                showMessage(`❌ Errore durante il salvataggio: ${error.message}`, 'error');
+            }
+        });
+        
+        document.getElementById('btn-clear-all').addEventListener('click', () => {
+            layoutTrainer.clearAll();
+        });
+    </script>
+{% endblock %}

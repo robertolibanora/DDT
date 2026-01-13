@@ -1,0 +1,356 @@
+/* 
+ * Stili per Layout Trainer - Tema Mare
+ * Miglioramenti contrasto e leggibilità
+ */
+
+/* Variabili colore tema mare - coerenti con main.css */
+:root {
+    --blue-deep: #0A2540;
+    --blue-sea: #1E6FAE;
+    --aqua-light: #E6F4FA;
+    --sand-light: #F4F6F8;
+    --white: #FFFFFF;
+    --coral-red: #E63946;
+}
+
+.layout-trainer-container {
+    display: flex;
+    gap: 20px;
+    margin-top: 20px;
+    flex-wrap: wrap;
+}
+
+.layout-canvas-section {
+    flex: 1;
+    min-width: 300px;
+    background: var(--white);
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(10, 38, 71, 0.1);
+    border: 2px solid var(--aqua-light);
+}
+
+.layout-controls-section {
+    width: 100%;
+    max-width: 350px;
+    background: var(--white);
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(10, 38, 71, 0.1);
+    border: 2px solid var(--aqua-light);
+}
+
+#layout-canvas {
+    border: 3px solid var(--blue-sea);
+    cursor: crosshair;
+    max-width: 100%;
+    height: auto;
+    display: block;
+    background: var(--sand-light);
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(10, 38, 71, 0.15);
+}
+
+/* Controlli form */
+.field-select-group,
+.supplier-input-group,
+.rule-name-input-group {
+    margin-bottom: 20px;
+}
+
+.field-select-group label,
+.supplier-input-group label,
+.rule-name-input-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 700;
+    color: var(--blue-deep);
+    font-size: 0.95em;
+    line-height: 1.5;
+}
+
+.field-select-group select,
+.supplier-input-group input,
+.rule-name-input-group input {
+    width: 100%;
+    padding: 12px 16px;
+    border: 2px solid var(--aqua-light);
+    border-radius: 8px;
+    font-size: 16px; /* Previene zoom su iOS */
+    background: var(--white);
+    color: var(--blue-deep);
+    font-family: inherit;
+    transition: all 0.3s ease;
+    line-height: 1.5;
+}
+
+.field-select-group select:focus,
+.supplier-input-group input:focus,
+.rule-name-input-group input:focus {
+    outline: none;
+    border-color: var(--blue-sea);
+    box-shadow: 0 0 0 3px rgba(30, 111, 174, 0.1);
+    background: var(--aqua-light);
+}
+
+/* Lista box */
+.boxes-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.boxes-list li {
+    padding: 12px;
+    margin-bottom: 8px;
+    background: var(--sand-light);
+    border-radius: 6px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    border: 2px solid transparent;
+    transition: all 0.3s ease;
+}
+
+/* Messaggio vuoto nella lista */
+.boxes-list li:only-child:has-text("Nessun box") {
+    justify-content: center;
+    font-style: italic;
+    color: var(--blue-sea);
+    background: var(--sand-light);
+}
+
+.boxes-list li.selected {
+    background: var(--aqua-light);
+    border-color: var(--blue-sea);
+    box-shadow: 0 2px 8px rgba(30, 111, 174, 0.2);
+}
+
+.boxes-list li span {
+    flex: 1;
+    font-weight: 600;
+    color: var(--blue-deep);
+    font-size: 0.95em;
+}
+
+.boxes-list li button {
+    margin-left: 5px;
+    padding: 6px 12px;
+    font-size: 0.85em;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    min-height: 32px;
+    min-width: 60px;
+}
+
+.boxes-list li button:first-of-type {
+    background: var(--blue-sea);
+    color: var(--white);
+}
+
+.boxes-list li button:first-of-type:hover {
+    background: var(--blue-deep);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(30, 111, 174, 0.3);
+}
+
+.boxes-list li button:last-of-type {
+    background: var(--coral-red);
+    color: var(--white);
+}
+
+.boxes-list li button:last-of-type:hover {
+    background: #C1121F;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(230, 57, 70, 0.3);
+}
+
+/* Action buttons */
+.action-buttons {
+    margin-top: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.action-buttons button {
+    padding: 14px 20px;
+    border: none;
+    border-radius: 8px;
+    font-size: 1em;
+    cursor: pointer;
+    font-weight: 700;
+    transition: all 0.3s ease;
+    min-height: 48px;
+    box-shadow: 0 4px 12px rgba(10, 38, 71, 0.15);
+}
+
+.btn-save {
+    background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
+    color: var(--white);
+}
+
+.btn-save:hover:not(:disabled) {
+    background: linear-gradient(135deg, #229954 0%, #1e8449 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(34, 153, 84, 0.4);
+}
+
+.btn-clear {
+    background: linear-gradient(135deg, var(--coral-red) 0%, #C1121F 100%);
+    color: var(--white);
+}
+
+.btn-clear:hover:not(:disabled) {
+    background: linear-gradient(135deg, #C1121F 0%, #A1121F 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(230, 57, 70, 0.4);
+}
+
+.action-buttons button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none !important;
+}
+
+/* Istruzioni */
+.instructions {
+    background: linear-gradient(135deg, var(--aqua-light) 0%, var(--sand-light) 100%);
+    padding: 20px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    border: 2px solid var(--blue-sea);
+    box-shadow: 0 2px 8px rgba(10, 38, 71, 0.1);
+}
+
+.instructions h3 {
+    margin-top: 0;
+    margin-bottom: 12px;
+    color: var(--blue-deep);
+    font-size: 1.2em;
+    font-weight: 700;
+}
+
+.instructions ul {
+    margin: 12px 0;
+    padding-left: 24px;
+    color: var(--blue-deep);
+    line-height: 1.7;
+}
+
+.instructions li {
+    margin-bottom: 8px;
+    font-size: 0.95em;
+}
+
+.instructions p {
+    margin-top: 12px;
+    color: var(--blue-deep);
+    font-weight: 600;
+    font-size: 0.9em;
+    line-height: 1.6;
+}
+
+.instructions code {
+    background: var(--white);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: 'Monaco', 'Courier New', monospace;
+    font-size: 0.9em;
+    color: var(--blue-deep);
+    border: 1px solid var(--aqua-light);
+}
+
+/* Messaggi */
+.message {
+    padding: 14px 18px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    font-weight: 500;
+    line-height: 1.6;
+    border-left: 4px solid;
+}
+
+.message.success {
+    background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+    color: #1b5e20;
+    border-left-color: #4caf50;
+}
+
+.message.error {
+    background: linear-gradient(135deg, #ffe5e5 0%, #ffcccc 100%);
+    color: #b71c1c;
+    border-left-color: var(--coral-red);
+}
+
+.message.hidden {
+    display: none;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .layout-trainer-container {
+        flex-direction: column;
+        gap: 15px;
+    }
+    
+    .layout-canvas-section,
+    .layout-controls-section {
+        width: 100%;
+        max-width: 100%;
+        padding: 15px;
+    }
+    
+    #layout-canvas {
+        width: 100%;
+        height: auto;
+    }
+    
+    .boxes-list {
+        max-height: 200px;
+    }
+    
+    .instructions {
+        padding: 15px;
+        font-size: 0.9em;
+    }
+    
+    .action-buttons button {
+        width: 100%;
+        padding: 12px;
+    }
+}
+
+/* Miglioramenti accessibilità */
+.field-select-group select:focus-visible,
+.supplier-input-group input:focus-visible,
+.rule-name-input-group input:focus-visible,
+.action-buttons button:focus-visible {
+    outline: 3px solid var(--blue-sea);
+    outline-offset: 2px;
+}
+
+/* Scrollbar personalizzato per lista box */
+.boxes-list::-webkit-scrollbar {
+    width: 8px;
+}
+
+.boxes-list::-webkit-scrollbar-track {
+    background: var(--sand-light);
+    border-radius: 4px;
+}
+
+.boxes-list::-webkit-scrollbar-thumb {
+    background: var(--blue-sea);
+    border-radius: 4px;
+}
+
+.boxes-list::-webkit-scrollbar-thumb:hover {
+    background: var(--blue-deep);
+}
