@@ -218,7 +218,7 @@ def _create_auto_rule_from_pattern(pattern_data: Dict[str, Any], corrected_data:
         return None
 
 
-def save_correction(file_path: str, original_data: Dict[str, Any], corrected_data: Dict[str, Any]) -> str:
+def save_correction(file_path: str, original_data: Dict[str, Any], corrected_data: Dict[str, Any], annotations: Optional[Dict[str, Any]] = None) -> str:
     """
     Salva una correzione manuale e crea regole automatiche se necessario
     
@@ -226,6 +226,8 @@ def save_correction(file_path: str, original_data: Dict[str, Any], corrected_dat
         file_path: Percorso del file PDF originale
         original_data: Dati estratti originalmente dall'AI
         corrected_data: Dati corretti manualmente dall'utente
+        annotations: Dizionario con le coordinate dei riquadri disegnati dall'utente (opzionale)
+                    Formato: {field: {x, y, width, height}}
         
     Returns:
         ID della correzione salvata
@@ -244,7 +246,8 @@ def save_correction(file_path: str, original_data: Dict[str, Any], corrected_dat
         "original_data": original_data,
         "corrected_data": corrected_data,
         "timestamp": datetime.now().isoformat(),
-        "fields_changed": []
+        "fields_changed": [],
+        "annotations": annotations if annotations else {}  # Salva le annotazioni grafiche
     }
     
     # Identifica quali campi sono stati modificati
@@ -417,3 +420,48 @@ def reload_corrections_cache():
     global _corrections_cache
     _corrections_cache = None
     _load_corrections()
+
+
+def get_annotations_for_mittente(mittente: str, similarity_threshold: float = 0.7) -> Optional[Dict[str, Any]]:
+    """
+    Ottiene le annotazioni grafiche salvate per un mittente simile
+    
+    Args:
+        mittente: Nome del mittente da cercare
+        similarity_threshold: Soglia di similarità (0-1) per considerare un match
+        
+    Returns:
+        Dizionario con annotazioni se trovate, None altrimenti
+        Formato: {field: {x, y, width, height}}
+    """
+    corrections_data = _load_corrections()
+    corrections = corrections_data.get("corrections", {})
+    
+    mittente_lower = mittente.lower().strip()
+    if not mittente_lower:
+        return None
+    
+    # Cerca nelle correzioni più recenti per un mittente simile
+    for correction_id, correction in sorted(
+        corrections.items(),
+        key=lambda x: x[1].get("timestamp", ""),
+        reverse=True
+    ):
+        corrected_data = correction.get("corrected_data", {})
+        correction_mittente = corrected_data.get("mittente", "").lower().strip()
+        
+        if not correction_mittente:
+            continue
+        
+        # Calcola similarità semplice (percentuale di caratteri in comune)
+        # Per una soluzione più sofisticata si potrebbe usare difflib o fuzzywuzzy
+        common_chars = sum(1 for c in mittente_lower if c in correction_mittente)
+        similarity = common_chars / max(len(mittente_lower), len(correction_mittente), 1)
+        
+        if similarity >= similarity_threshold:
+            annotations = correction.get("annotations", {})
+            if annotations:
+                logger.info(f"Trovate annotazioni per mittente simile '{correction_mittente}' (similarità: {similarity:.2f})")
+                return annotations
+    
+    return None

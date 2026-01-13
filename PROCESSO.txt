@@ -1,0 +1,569 @@
+================================================================================
+                    PROCESSO COMPLETO DEL SISTEMA DDT EXTRACTOR
+================================================================================
+
+Questo documento descrive in dettaglio come funziona il sistema di estrazione
+automatica dei DDT (Documenti di Trasporto) da file PDF.
+
+================================================================================
+                            INDICE
+================================================================================
+
+1. OVERVIEW DEL SISTEMA
+2. FLUSSO COMPLETO DI ELABORAZIONE
+3. COMPONENTI PRINCIPALI
+4. SISTEMA DI APPRENDIMENTO AUTOMATICO
+5. PIPELINE DI ESTRAZIONE TESTO
+6. ANALISI CON OPENAI VISION
+7. GESTIONE CORREZIONI E SALVATAGGIO
+8. MONITORAGGIO AUTOMATICO (WATCHDOG)
+
+================================================================================
+                        1. OVERVIEW DEL SISTEMA
+================================================================================
+
+Il sistema DDT Extractor è progettato per:
+- Estrarre automaticamente dati strutturati da DDT PDF
+- Imparare dalle correzioni manuali degli utenti
+- Migliorare continuamente l'accuratezza dell'estrazione
+- Gestire regole personalizzate per fornitori specifici
+- Monitorare automaticamente una cartella per nuovi file
+
+ARCHITETTURA:
+- Backend: FastAPI (Python)
+- AI: OpenAI Vision API (GPT-4o-mini)
+- Storage: File Excel (ddt.xlsx)
+- Frontend: HTML/CSS/JavaScript con interfaccia web
+
+================================================================================
+                   2. FLUSSO COMPLETO DI ELABORAZIONE
+================================================================================
+
+Il processo di elaborazione di un DDT segue questi passaggi:
+
+┌─────────────────────────────────────────────────────────────────┐
+│                    FASE 1: RILEVAMENTO FILE                     │
+└─────────────────────────────────────────────────────────────────┘
+
+A) UPLOAD MANUALE:
+   - Utente carica PDF tramite interfaccia web (/upload)
+   - File salvato temporaneamente
+   - Copia creata in cartella inbox/
+
+B) MONITORAGGIO AUTOMATICO (Watchdog):
+   - Sistema monitora cartella inbox/ in tempo reale
+   - Quando rileva nuovo PDF:
+     * Calcola hash MD5 del file
+     * Verifica se già processato (evita duplicati)
+     * Attende che file sia completamente scritto (max 15 sec)
+     * Aggiunge alla coda per anteprima
+
+┌─────────────────────────────────────────────────────────────────┐
+│              FASE 2: ESTRAZIONE TESTO INTELLIGENTE              │
+└─────────────────────────────────────────────────────────────────┘
+
+Il sistema estrae prima il testo dal PDF usando una pipeline a cascata:
+
+STEP 1: PyMuPDF (metodo principale)
+   - Estrazione veloce per PDF nativi
+   - Mantiene layout e struttura
+   - Se testo affidabile → STOP
+
+STEP 2: pdfplumber (fallback migliorato)
+   - Parsing strutturato più accurato
+   - Migliore per tabelle e dati strutturati
+   - Se testo affidabile → STOP
+
+STEP 3: OCR (ultima risorsa)
+   - Solo se PDF è immagine scansionata
+   - Richiede Tesseract OCR installato
+   - Più lento ma necessario per PDF scansionati
+
+VALUTAZIONE AFFIDABILITÀ:
+   - Sistema valuta qualità testo estratto
+   - Calcola confidence score (0.0 - 1.0)
+   - Determina se testo è affidabile per uso successivo
+
+┌─────────────────────────────────────────────────────────────────┐
+│              FASE 3: RILEVAMENTO REGOLE DINAMICHE              │
+└─────────────────────────────────────────────────────────────────┘
+
+Il testo estratto viene analizzato per rilevare regole personalizzate:
+
+- Sistema cerca keyword definite nelle regole (app/rules/rules.json)
+- Se trova corrispondenza:
+  * Carica regola specifica
+  * Estrae istruzioni personalizzate per l'AI
+  * Prepara prompt modificato
+
+Esempio:
+  Keyword: "DEVA, Armanini"
+  → Regola "DEVA" attivata
+  → Istruzioni: "Calcola totale_kg come somma delle righe"
+
+┌─────────────────────────────────────────────────────────────────┐
+│            FASE 4: COSTRUZIONE PROMPT DINAMICO                 │
+└─────────────────────────────────────────────────────────────────┘
+
+Il sistema costruisce un prompt ottimizzato per OpenAI:
+
+COMPONENTI DEL PROMPT:
+
+1. PROMPT BASE:
+   - Istruzioni generali per estrazione DDT
+   - Formato output JSON richiesto
+   - Regole di normalizzazione
+
+2. REGOLE SPECIFICHE (se rilevate):
+   - Istruzioni personalizzate per il fornitore
+   - Override per campi specifici
+   - Comportamenti speciali (multipagina, calcolo somme, ecc.)
+
+3. GROUNDING DEL TESTO (se affidabile):
+   - Testo estratto aggiunto come riferimento
+   - AI usa testo per migliorare precisione
+   - IMPORTANTE: testo è solo riferimento, non fonte unica
+   - AI privilegia sempre analisi visiva dell'immagine
+
+┌─────────────────────────────────────────────────────────────────┐
+│            FASE 5: CONVERSIONE PDF → IMMAGINE                  │
+└─────────────────────────────────────────────────────────────────┘
+
+Il PDF viene convertito in immagine PNG per OpenAI Vision:
+
+METODO 1: PyMuPDF (preferito)
+   - Conversione diretta PDF → PNG
+   - DPI: 200 (qualità alta)
+   - Solo prima pagina
+
+METODO 2: pdf2image (fallback)
+   - Richiede Poppler installato
+   - Stessa qualità, stesso DPI
+
+┌─────────────────────────────────────────────────────────────────┐
+│            FASE 6: ANALISI CON OPENAI VISION API                │
+└─────────────────────────────────────────────────────────────────┘
+
+Chiamata API OpenAI Vision:
+
+INPUT:
+   - Immagine PNG (base64 encoded)
+   - Prompt dinamico completo
+   - Formato JSON obbligatorio
+
+PROCESSO:
+   - OpenAI analizza immagine visivamente
+   - Usa testo estratto come riferimento contestuale
+   - Applica regole specifiche se presenti
+   - Estrae dati strutturati
+
+OUTPUT:
+   - JSON con campi estratti:
+     * data (YYYY-MM-DD)
+     * mittente
+     * destinatario
+     * numero_documento
+     * totale_kg (float)
+
+┌─────────────────────────────────────────────────────────────────┐
+│         FASE 7: NORMALIZZAZIONE E VALIDAZIONE DATI              │
+└─────────────────────────────────────────────────────────────────┘
+
+I dati grezzi vengono normalizzati:
+
+NORMALIZZAZIONE:
+   - Date: convertite in formato YYYY-MM-DD
+   - Testi: rimossi spazi extra, caratteri strani
+   - Numeri: convertiti in float
+   - Nomi aziende: puliti da prefissi comuni
+
+VALIDAZIONE:
+   - Verifica mittente ≠ destinatario
+   - Controllo formato campi obbligatori
+   - Validazione con Pydantic models
+   - Gestione errori con messaggi chiari
+
+┌─────────────────────────────────────────────────────────────────┐
+│        FASE 8: APPLICAZIONE APPRENDIMENTO AUTOMATICO           │
+└─────────────────────────────────────────────────────────────────┘
+
+Il sistema applica suggerimenti basati su correzioni precedenti:
+
+PROCESSO:
+   1. Carica pattern di apprendimento (app/corrections/corrections.json)
+   2. Confronta dati estratti con pattern noti
+   3. Se trova pattern riconosciuto ≥2 volte:
+      * Applica correzione automatica
+      * Log dell'applicazione
+
+ESEMPIO:
+   Pattern: "ACME SRL" → "ACME S.r.l."
+   Se estratto "ACME SRL" → automaticamente corretto in "ACME S.r.l."
+
+┌─────────────────────────────────────────────────────────────────┐
+│              FASE 9: ANTEPRIMA E CORREZIONE                     │
+└─────────────────────────────────────────────────────────────────┘
+
+I dati estratti vengono mostrati all'utente per verifica:
+
+ANTEPRIMA MODAL:
+   - Mostra PDF convertito in immagine
+   - Form con dati estratti editabili
+   - Utente può correggere eventuali errori
+   - Salvataggio con conferma
+
+┌─────────────────────────────────────────────────────────────────┐
+│         FASE 10: SALVATAGGIO E APPRENDIMENTO                   │
+└─────────────────────────────────────────────────────────────────┘
+
+Quando utente salva (anche senza modifiche):
+
+A) SALVATAGGIO CORREZIONE:
+   - Confronta dati originali vs corretti
+   - Identifica campi modificati
+   - Salva correzione in app/corrections/corrections.json
+   - Aggiorna pattern di apprendimento
+
+B) CREAZIONE PATTERN:
+   - Per ogni campo modificato:
+     * Crea/aggiorna pattern: valore_originale → valore_corretto
+     * Incrementa contatore pattern
+     * Traccia mittente per regole automatiche
+
+C) CREAZIONE REGOLE AUTOMATICHE:
+   - Se pattern riconosciuto ≥5 volte:
+     * Crea regola automatica
+     * Estrae keyword dal mittente
+     * Genera istruzioni AI
+     * Salva in app/rules/rules.json
+     * Log della creazione
+
+D) SALVATAGGIO EXCEL:
+   - Verifica duplicati (numero_documento + mittente)
+   - Se esiste: aggiorna riga esistente
+   - Se nuovo: aggiunge nuova riga
+   - Operazione thread-safe con lock
+
+================================================================================
+                       3. COMPONENTI PRINCIPALI
+================================================================================
+
+FILE CHIAVE:
+
+main.py
+   - Applicazione FastAPI principale
+   - Watchdog per monitoraggio cartella inbox/
+   - Route per upload, dashboard, autenticazione
+   - Gestione ciclo di vita applicazione
+
+app/extract.py
+   - Estrazione dati da PDF con OpenAI Vision
+   - Coordinamento pipeline estrazione testo
+   - Costruzione prompt dinamico
+   - Normalizzazione e validazione dati
+
+app/corrections.py
+   - Sistema di apprendimento automatico
+   - Salvataggio correzioni manuali
+   - Tracciamento pattern di apprendimento
+   - Creazione regole automatiche
+
+app/text_extraction/orchestrator.py
+   - Pipeline intelligente estrazione testo
+   - Coordinamento PyMuPDF → pdfplumber → OCR
+   - Valutazione affidabilità testo
+
+app/rules/rules.py
+   - Gestione regole dinamiche
+   - Rilevamento regole da keyword
+   - Costruzione istruzioni AI personalizzate
+
+app/excel.py
+   - Gestione file Excel thread-safe
+   - Operazioni atomiche con lock
+   - Prevenzione duplicati
+   - Lettura/scrittura sicura
+
+app/watchdog_queue.py
+   - Coda per DDT rilevati automaticamente
+   - Gestione stato processamento
+   - Evita duplicati e race conditions
+
+================================================================================
+                 4. SISTEMA DI APPRENDIMENTO AUTOMATICO
+================================================================================
+
+Il sistema impara automaticamente dagli errori e dalle correzioni:
+
+MECCANISMO:
+
+1. TRACCIAMENTO CORREZIONI:
+   - Ogni correzione manuale viene salvata
+   - File: app/corrections/corrections.json
+   - Struttura:
+     {
+       "corrections": {
+         "hash_timestamp": {
+           "original_data": {...},
+           "corrected_data": {...},
+           "fields_changed": [...]
+         }
+       },
+       "learning_patterns": {
+         "field_valore_originale": {
+           "field": "mittente",
+           "original_pattern": "ACME SRL",
+           "corrected_value": "ACME S.r.l.",
+           "count": 3,
+           "files": ["hash1", "hash2", ...]
+         }
+       }
+     }
+
+2. APPLICAZIONE SUGGERIMENTI:
+   - Durante estrazione, sistema cerca pattern noti
+   - Se pattern riconosciuto ≥2 volte:
+     * Applica correzione automaticamente
+     * Log dell'applicazione
+   - Utente vede già dati corretti in anteprima
+
+3. CREAZIONE REGOLE AUTOMATICHE:
+   - Soglia: 5 correzioni simili
+   - Sistema crea regola automaticamente:
+     * Nome: basato su mittente
+     * Keyword: estratte dal nome mittente
+     * Istruzioni: generate dal pattern di correzione
+   - Regola salvata in app/rules/rules.json
+   - Tracciata in "auto_rules_created"
+
+ESEMPIO PRATICO:
+
+Correzione 1: "ACME SRL" → "ACME S.r.l." (mittente: ACME)
+Correzione 2: "ACME SRL" → "ACME S.r.l." (mittente: ACME)
+Correzione 3: "ACME SRL" → "ACME S.r.l." (mittente: ACME)
+Correzione 4: "ACME SRL" → "ACME S.r.l." (mittente: ACME)
+Correzione 5: "ACME SRL" → "ACME S.r.l." (mittente: ACME)
+
+→ Sistema crea regola automatica:
+   Nome: "ACME"
+   Keyword: ["ACME"]
+   Istruzioni: "Il campo mittente viene spesso estratto come 'ACME SRL' 
+                ma deve essere 'ACME S.r.l.'"
+
+→ Prossimi DDT con keyword "ACME" useranno questa regola automaticamente
+
+================================================================================
+                 5. PIPELINE DI ESTRAZIONE TESTO
+================================================================================
+
+Il sistema usa una pipeline intelligente a cascata:
+
+METODI DISPONIBILI:
+
+1. PyMuPDF (fitz):
+   - Veloce, efficiente
+   - Ottimo per PDF nativi
+   - Mantiene layout
+   - Primo tentativo
+
+2. pdfplumber:
+   - Parsing strutturato avanzato
+   - Migliore per tabelle
+   - Estrazione più accurata
+   - Secondo tentativo
+
+3. OCR (Tesseract):
+   - Solo per PDF scansionati
+   - Richiede installazione Tesseract
+   - Più lento
+   - Ultima risorsa
+
+VALUTAZIONE AFFIDABILITÀ:
+
+Il sistema valuta ogni estrazione:
+- Confidence score (0.0 - 1.0)
+- Lunghezza testo estratto
+- Presenza di pattern comuni DDT
+- Qualità caratteri riconosciuti
+
+Se confidence ≥ soglia → testo considerato affidabile
+Se confidence < soglia → testo usato solo come riferimento
+
+USO DEL TESTO ESTRATTO:
+
+1. RILEVAMENTO REGOLE:
+   - Testo analizzato per keyword regole
+   - Anche se non affidabile al 100%
+
+2. GROUNDING PROMPT:
+   - Solo se testo affidabile (confidence alta)
+   - Aggiunto al prompt OpenAI come riferimento
+   - AI usa per migliorare precisione
+   - MA: privilegia sempre analisi visiva
+
+================================================================================
+                   6. ANALISI CON OPENAI VISION
+================================================================================
+
+Il sistema usa OpenAI Vision API per analisi visiva:
+
+CONFIGURAZIONE:
+- Modello: GPT-4o-mini (configurabile in .env)
+- Formato: JSON obbligatorio
+- Temperature: 0.1 (deterministico)
+
+INPUT:
+- Immagine PNG (prima pagina PDF)
+- Prompt dinamico completo
+- Testo estratto come riferimento (se affidabile)
+
+PROCESSO:
+1. Conversione PDF → PNG (DPI 200)
+2. Encoding base64 immagine
+3. Costruzione messaggio con:
+   - System prompt (istruzioni)
+   - User message (immagine + testo riferimento)
+4. Chiamata API OpenAI
+5. Parsing risposta JSON
+
+OUTPUT:
+- JSON strutturato con campi DDT
+- Validazione formato
+- Normalizzazione valori
+
+VANTAGGI:
+- Analisi visiva accurata
+- Gestione layout complessi
+- Riconoscimento caratteri anche in immagini
+- Adattamento a formati diversi
+
+LIMITAZIONI:
+- Costo API per chiamata
+- Dipendenza da connessione internet
+- Rate limits OpenAI
+
+================================================================================
+             7. GESTIONE CORREZIONI E SALVATAGGIO
+================================================================================
+
+FLUSSO SALVATAGGIO:
+
+1. UTENTE SALVA DALL'ANTEPRIMA:
+   - Endpoint: POST /preview/save
+   - Dati: original_data + corrected_data
+   - File hash per identificazione
+
+2. SALVATAGGIO CORREZIONE:
+   - Confronto dati originali vs corretti
+   - Identificazione campi modificati
+   - Salvataggio in corrections.json
+   - Aggiornamento pattern apprendimento
+
+3. CREAZIONE PATTERN:
+   - Per ogni campo modificato:
+     * Pattern key: "field_valore_originale"
+     * Traccia: valore originale → valore corretto
+     * Incrementa contatore
+     * Aggiunge file hash alla lista
+
+4. VERIFICA REGOLE AUTOMATICHE:
+   - Se pattern count ≥ 5:
+     * Crea regola automatica
+     * Estrae keyword mittente
+     * Genera istruzioni
+     * Salva in rules.json
+
+5. SALVATAGGIO EXCEL:
+   - Verifica duplicati:
+     * Cerca per numero_documento + mittente
+     * Match case-insensitive per mittente
+   - Se trovato: aggiorna riga esistente
+   - Se nuovo: aggiunge nuova riga
+   - Operazione thread-safe (lock)
+
+PREVENZIONE DUPLICATI:
+
+Il sistema previene duplicati a più livelli:
+
+A) WATCHDOG:
+   - Hash MD5 file
+   - Verifica se già processato
+   - Cache file processati
+
+B) EXCEL:
+   - Match su numero_documento + mittente
+   - Aggiorna invece di duplicare
+   - Verifica prima di aggiungere
+
+C) CODA ANTEPRIMA:
+   - Traccia file in coda
+   - Evita riprocessamento simultaneo
+   - Marca come processato dopo salvataggio
+
+================================================================================
+             8. MONITORAGGIO AUTOMATICO (WATCHDOG)
+================================================================================
+
+Il sistema include un watchdog che monitora la cartella inbox/:
+
+FUNZIONAMENTO:
+
+1. AVVIO:
+   - Watchdog avviato all'avvio applicazione
+   - Monitora cartella inbox/ in tempo reale
+   - Usa libreria watchdog (Python)
+
+2. RILEVAMENTO FILE:
+   - Eventi monitorati:
+     * on_created: nuovo file creato
+     * on_moved: file spostato/copiato
+     * on_modified: file modificato
+   - Filtra solo file .pdf
+
+3. PROCESSAMENTO:
+   - Calcola hash MD5 file
+   - Verifica se già processato
+   - Attende file completamente scritto (max 15 sec)
+   - Estrae dati dal PDF
+   - Aggiunge alla coda anteprima
+
+4. CODA ANTEPRIMA:
+   - File aggiunti a coda (watchdog_queue.json)
+   - Frontend mostra elementi in coda
+   - Utente può verificare e salvare
+   - Dopo salvataggio: rimosso dalla coda
+
+GESTIONE STATO:
+
+- _processed_files: Set di hash file già processati
+- _processing_files: Set di file in elaborazione
+- Evita race conditions
+- Previene duplicati
+
+PULIZIA AUTOMATICA:
+- Elementi vecchi rimossi automaticamente
+- File temporanei puliti dopo salvataggio
+- Cache gestita automaticamente
+
+================================================================================
+                            CONCLUSIONI
+================================================================================
+
+Il sistema DDT Extractor combina:
+
+✓ Estrazione intelligente testo (pipeline a cascata)
+✓ Analisi visiva avanzata (OpenAI Vision)
+✓ Apprendimento automatico (pattern e regole)
+✓ Gestione robusta errori e duplicati
+✓ Interfaccia utente intuitiva
+✓ Monitoraggio automatico file
+
+Il risultato è un sistema che:
+- Migliora continuamente la propria accuratezza
+- Si adatta automaticamente a nuovi fornitori
+- Riduce il lavoro manuale dell'utente
+- Gestisce grandi volumi di documenti
+
+================================================================================
+                            FINE DOCUMENTO
+================================================================================

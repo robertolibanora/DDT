@@ -22,7 +22,7 @@ from app.config import OPENAI_API_KEY, MODEL
 from app.models import DDTData
 from app.utils import normalize_date, normalize_float, normalize_text, clean_company_name
 from app.rules.rules import detect_rule, build_prompt_additions, reload_rules
-from app.corrections import apply_learning_suggestions
+from app.corrections import apply_learning_suggestions, get_annotations_for_mittente
 from app.text_extraction.orchestrator import extract_text_pipeline, extract_text_for_rule_detection
 from app.text_extraction.decision import TextExtractionResult
 from pydantic import ValidationError
@@ -101,13 +101,15 @@ def extract_text_from_pdf(file_path: str) -> str:
     return extract_text_for_rule_detection(file_path)
 
 
-def build_dynamic_prompt(rule_name: Optional[str] = None, extracted_text: Optional[str] = None) -> str:
+def build_dynamic_prompt(rule_name: Optional[str] = None, extracted_text: Optional[str] = None, annotations: Optional[Dict[str, Any]] = None) -> str:
     """
     Costruisce il prompt dinamico con eventuali regole aggiuntive e grounding del testo
     
     Args:
         rule_name: Nome della regola da applicare (opzionale)
         extracted_text: Testo estratto automaticamente per grounding (opzionale)
+        annotations: Dizionario con coordinate dei riquadri annotati dall'utente (opzionale)
+                    Formato: {field: {x, y, width, height}}
         
     Returns:
         Prompt completo con eventuali aggiunte e grounding
@@ -119,6 +121,33 @@ def build_dynamic_prompt(rule_name: Optional[str] = None, extracted_text: Option
         additions = build_prompt_additions(rule_name)
         if additions:
             prompt += additions
+    
+    # Aggiungi informazioni sulle annotazioni grafiche se disponibili
+    if annotations:
+        prompt += """
+
+---
+🎯 ANNOTAZIONI GRAFICHE (POSIZIONI INDICATE DALL'UTENTE):
+L'utente ha indicato graficamente dove si trovano i dati nel documento. 
+Usa queste informazioni come riferimento per cercare i dati nelle aree indicate.
+
+"""
+        field_labels = {
+            'data': 'Data DDT',
+            'mittente': 'Mittente',
+            'destinatario': 'Destinatario',
+            'numero_documento': 'Numero Documento',
+            'totale_kg': 'Totale Kg'
+        }
+        
+        for field, rect in annotations.items():
+            field_label = field_labels.get(field, field)
+            prompt += f"- **{field_label}**: Cerca nell'area approssimativa alle coordinate (x: {rect.get('x', 0):.0f}, y: {rect.get('y', 0):.0f}, larghezza: {rect.get('width', 0):.0f}, altezza: {rect.get('height', 0):.0f})\n"
+        
+        prompt += """
+⚠️ NOTA: Le coordinate sono relative all'immagine del documento. 
+Cerca i dati nelle aree indicate, ma verifica sempre che i dati estratti siano corretti.
+"""
     
     # Aggiungi grounding del testo estratto se disponibile e affidabile
     if extracted_text and extracted_text.strip():
@@ -196,9 +225,36 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
         else:
             logger.info("Nessuna regola specifica rilevata, uso prompt standard")
         
-        # Costruisci prompt dinamico con grounding del testo (se affidabile)
+        # Prova a ottenere annotazioni grafiche basate su un'estrazione preliminare del mittente
+        # (se disponibile dal testo estratto)
+        annotations = None
+        if pdf_text:
+            # Estrai un possibile mittente dal testo per cercare annotazioni simili
+            # Questo è un tentativo preliminare, le annotazioni verranno usate se disponibili
+            try:
+                # Cerca pattern comuni di mittente nel testo
+                import re
+                mittente_patterns = [
+                    r'(?:Mittente|Da:|Fornitore|Spett\.le)\s*:?\s*([A-Z][A-Za-z0-9\s&\.]+)',
+                    r'([A-Z][A-Za-z0-9\s&\.]+)\s*(?:S\.r\.l\.|S\.p\.A\.|S\.A\.S\.|S\.A\.)',
+                ]
+                potential_mittente = None
+                for pattern in mittente_patterns:
+                    match = re.search(pattern, pdf_text[:500], re.IGNORECASE)
+                    if match:
+                        potential_mittente = match.group(1).strip()
+                        break
+                
+                if potential_mittente:
+                    annotations = get_annotations_for_mittente(potential_mittente)
+                    if annotations:
+                        logger.info(f"Trovate annotazioni grafiche per mittente simile: {potential_mittente}")
+            except Exception as e:
+                logger.debug(f"Errore ricerca annotazioni preliminari: {e}")
+        
+        # Costruisci prompt dinamico con grounding del testo (se affidabile) e annotazioni
         extracted_text_for_grounding = pdf_text if (text_extraction_result and text_extraction_result.is_reliable) else None
-        dynamic_prompt = build_dynamic_prompt(rule_name, extracted_text=extracted_text_for_grounding)
+        dynamic_prompt = build_dynamic_prompt(rule_name, extracted_text=extracted_text_for_grounding, annotations=annotations)
         
         # Converti PDF in immagini (OpenAI Vision richiede immagini, non PDF)
         # Prova prima PyMuPDF (non richiede Poppler), poi pdf2image come fallback

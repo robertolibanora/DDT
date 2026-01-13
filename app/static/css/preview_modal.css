@@ -142,6 +142,98 @@
     align-items: center;
     justify-content: center;
     padding: 10px;
+    position: relative;
+}
+
+.preview-image-wrapper {
+    position: relative;
+    display: inline-block;
+    max-width: 100%;
+    margin: 0 auto;
+}
+
+.preview-image-wrapper img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    position: relative;
+    z-index: 1;
+}
+
+#preview-annotation-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: all;
+    touch-action: none;
+    z-index: 2;
+    image-rendering: pixelated;
+}
+
+.preview-annotation-controls {
+    margin-bottom: 15px;
+    padding: 15px;
+    background: var(--spuma-bianca);
+    border-radius: var(--radius-md);
+    border: 2px solid var(--perla);
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.preview-annotation-controls label {
+    color: var(--oceano-profondo);
+    font-weight: 600;
+    margin: 0;
+}
+
+.preview-annotation-controls select {
+    flex: 1;
+    min-width: 200px;
+    padding: 10px 15px;
+    background: var(--schiuma-bianca);
+    border: 2px solid var(--perla);
+    border-radius: var(--radius-md);
+    color: var(--oceano-profondo);
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.preview-annotation-controls select:focus {
+    outline: none;
+    border-color: var(--acqua-azzurra);
+    box-shadow: 0 0 0 3px rgba(44, 116, 179, 0.1);
+}
+
+.btn-clear-annotations {
+    padding: 10px 15px;
+    background: linear-gradient(135deg, var(--corallo) 0%, #e74c3c 100%);
+    color: white;
+    border: none;
+    border-radius: var(--radius-md);
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    white-space: nowrap;
+}
+
+.btn-clear-annotations:hover {
+    background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(231, 76, 60, 0.4);
+}
+
+.annotation-hint {
+    margin-top: 15px;
+    padding: 12px;
+    background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+    border: 2px solid var(--acqua-azzurra);
+    border-radius: var(--radius-md);
+    color: var(--oceano-profondo);
+    font-size: 0.9em;
+    line-height: 1.5;
 }
 
 .preview-pdf-container img {

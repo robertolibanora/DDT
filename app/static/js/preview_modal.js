@@ -9,6 +9,14 @@ class PreviewModal {
         this.currentData = null;
         this.currentFileHash = null;
         this.currentFileName = null;
+        this.annotations = {}; // {field: {x, y, width, height}}
+        this.isDrawing = false;
+        this.startX = 0;
+        this.startY = 0;
+        this.currentField = null;
+        this.canvas = null;
+        this.ctx = null;
+        this.imgElement = null;
         this.init();
     }
 
@@ -39,8 +47,26 @@ class PreviewModal {
                         <!-- PDF Preview Image -->
                         <div class="preview-pdf-section">
                             <h3>📄 Documento Scannerizzato</h3>
-                            <div class="preview-pdf-container">
-                                <img id="preview-pdf-image" src="" alt="Anteprima DDT" style="max-width: 100%; height: auto; display: block; margin: 0 auto;">
+                            <div class="preview-annotation-controls">
+                                <label for="annotation-field-select">🎯 Seleziona campo da annotare:</label>
+                                <select id="annotation-field-select">
+                                    <option value="">-- Nessun campo selezionato --</option>
+                                    <option value="data">📅 Data DDT</option>
+                                    <option value="mittente">🏢 Mittente</option>
+                                    <option value="destinatario">📍 Destinatario</option>
+                                    <option value="numero_documento">🔢 Numero Documento</option>
+                                    <option value="totale_kg">⚖️ Totale Kg</option>
+                                </select>
+                                <button id="clear-annotations-btn" class="btn-clear-annotations" title="Cancella tutte le annotazioni">🗑️ Cancella Annotazioni</button>
+                            </div>
+                            <div class="preview-pdf-container" id="preview-pdf-container">
+                                <div class="preview-image-wrapper">
+                                    <img id="preview-pdf-image" src="" alt="Anteprima DDT" style="max-width: 100%; height: auto; display: block; margin: 0 auto;">
+                                    <canvas id="preview-annotation-canvas"></canvas>
+                                </div>
+                            </div>
+                            <div class="annotation-hint">
+                                💡 <strong>Suggerimento:</strong> Seleziona un campo e disegna un riquadro sull'immagine per indicare dove si trova il dato. Questo aiuterà il modello a estrarre i dati con maggiore precisione.
                             </div>
                         </div>
 
@@ -118,12 +144,214 @@ class PreviewModal {
             e.preventDefault();
             this.saveData();
         });
+
+        // Setup annotazioni
+        this.setupAnnotationListeners();
+    }
+
+    setupAnnotationListeners() {
+        // Seleziona campo da annotare
+        const fieldSelect = document.getElementById('annotation-field-select');
+        fieldSelect.addEventListener('change', (e) => {
+            this.currentField = e.target.value || null;
+            if (this.currentField) {
+                this.updateCanvasCursor('crosshair');
+            } else {
+                this.updateCanvasCursor('default');
+            }
+        });
+
+        // Cancella annotazioni
+        const clearBtn = document.getElementById('clear-annotations-btn');
+        clearBtn.addEventListener('click', () => {
+            if (confirm('Vuoi cancellare tutte le annotazioni?')) {
+                this.annotations = {};
+                this.redrawAnnotations();
+            }
+        });
+
+        // Setup canvas per disegno
+        this.canvas = document.getElementById('preview-annotation-canvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.imgElement = document.getElementById('preview-pdf-image');
+
+        // Eventi mouse per disegno
+        this.canvas.addEventListener('mousedown', (e) => this.startDrawing(e));
+        this.canvas.addEventListener('mousemove', (e) => this.draw(e));
+        this.canvas.addEventListener('mouseup', (e) => this.stopDrawing(e));
+        this.canvas.addEventListener('mouseleave', () => this.stopDrawing(null));
+
+        // Eventi touch per mobile
+        this.canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const mouseEvent = new MouseEvent('mousedown', {
+                clientX: touch.clientX,
+                clientY: touch.clientY
+            });
+            this.canvas.dispatchEvent(mouseEvent);
+        });
+        this.canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const mouseEvent = new MouseEvent('mousemove', {
+                clientX: touch.clientX,
+                clientY: touch.clientY
+            });
+            this.canvas.dispatchEvent(mouseEvent);
+        });
+        this.canvas.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            const mouseEvent = new MouseEvent('mouseup', {});
+            this.canvas.dispatchEvent(mouseEvent);
+        });
+    }
+
+    updateCanvasCursor(cursor) {
+        if (this.canvas) {
+            this.canvas.style.cursor = cursor;
+        }
+    }
+
+    getCanvasCoordinates(e) {
+        const rect = this.canvas.getBoundingClientRect();
+        const scaleX = this.canvas.width / rect.width;
+        const scaleY = this.canvas.height / rect.height;
+        return {
+            x: (e.clientX - rect.left) * scaleX,
+            y: (e.clientY - rect.top) * scaleY
+        };
+    }
+
+    startDrawing(e) {
+        if (!this.currentField) return;
+        
+        this.isDrawing = true;
+        const coords = this.getCanvasCoordinates(e);
+        this.startX = coords.x;
+        this.startY = coords.y;
+    }
+
+    draw(e) {
+        if (!this.isDrawing || !this.currentField) return;
+
+        const coords = this.getCanvasCoordinates(e);
+        this.redrawAnnotations();
+        
+        // Disegna il riquadro temporaneo
+        this.ctx.strokeStyle = this.getFieldColor(this.currentField);
+        this.ctx.lineWidth = 3;
+        this.ctx.setLineDash([5, 5]);
+        this.ctx.strokeRect(
+            this.startX,
+            this.startY,
+            coords.x - this.startX,
+            coords.y - this.startY
+        );
+        this.ctx.setLineDash([]);
+    }
+
+    stopDrawing(e) {
+        if (!this.isDrawing || !this.currentField) return;
+        
+        if (e) {
+            const coords = this.getCanvasCoordinates(e);
+            const width = coords.x - this.startX;
+            const height = coords.y - this.startY;
+            
+            // Salva solo se il riquadro ha una dimensione minima
+            if (Math.abs(width) > 10 && Math.abs(height) > 10) {
+                this.annotations[this.currentField] = {
+                    x: Math.min(this.startX, coords.x),
+                    y: Math.min(this.startY, coords.y),
+                    width: Math.abs(width),
+                    height: Math.abs(height)
+                };
+            }
+        }
+        
+        this.isDrawing = false;
+        this.redrawAnnotations();
+    }
+
+    getFieldColor(field) {
+        const colors = {
+            'data': '#FF6B6B',
+            'mittente': '#4ECDC4',
+            'destinatario': '#45B7D1',
+            'numero_documento': '#FFA07A',
+            'totale_kg': '#98D8C8'
+        };
+        return colors[field] || '#000000';
+    }
+
+    getFieldLabel(field) {
+        const labels = {
+            'data': '📅 Data DDT',
+            'mittente': '🏢 Mittente',
+            'destinatario': '📍 Destinatario',
+            'numero_documento': '🔢 Numero Documento',
+            'totale_kg': '⚖️ Totale Kg'
+        };
+        return labels[field] || field;
+    }
+
+    redrawAnnotations() {
+        if (!this.ctx || !this.imgElement) return;
+        
+        // Pulisci il canvas
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        
+        // Ridisegna tutte le annotazioni
+        for (const [field, rect] of Object.entries(this.annotations)) {
+            this.ctx.strokeStyle = this.getFieldColor(field);
+            this.ctx.fillStyle = this.getFieldColor(field);
+            this.ctx.lineWidth = 3;
+            this.ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+            
+            // Aggiungi etichetta
+            this.ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+            this.ctx.fillRect(rect.x, rect.y - 25, 150, 20);
+            this.ctx.fillStyle = this.getFieldColor(field);
+            this.ctx.font = '12px Arial';
+            this.ctx.fillText(this.getFieldLabel(field), rect.x + 5, rect.y - 8);
+        }
+    }
+
+    resizeCanvas() {
+        if (!this.canvas || !this.imgElement) return;
+        
+        // Aspetta che l'immagine sia caricata
+        if (this.imgElement.complete && this.imgElement.naturalWidth > 0) {
+            // Usa le dimensioni naturali dell'immagine per il canvas
+            const naturalWidth = this.imgElement.naturalWidth;
+            const naturalHeight = this.imgElement.naturalHeight;
+            
+            // Imposta le dimensioni del canvas alle dimensioni naturali dell'immagine
+            this.canvas.width = naturalWidth;
+            this.canvas.height = naturalHeight;
+            
+            // Imposta le dimensioni visualizzate del canvas per corrispondere all'immagine
+            const rect = this.imgElement.getBoundingClientRect();
+            this.canvas.style.width = rect.width + 'px';
+            this.canvas.style.height = rect.height + 'px';
+            this.canvas.style.position = 'absolute';
+            this.canvas.style.top = '0';
+            this.canvas.style.left = '0';
+            
+            // Ridisegna le annotazioni con le nuove dimensioni
+            this.redrawAnnotations();
+        } else {
+            // Se l'immagine non è ancora caricata, riprova dopo un breve delay
+            setTimeout(() => this.resizeCanvas(), 100);
+        }
     }
 
     show(extractedData, pdfBase64, fileHash, fileName) {
         this.currentData = extractedData;
         this.currentFileHash = fileHash;
         this.currentFileName = fileName;
+        this.annotations = {}; // Reset annotazioni
 
         // Imposta immagine PNG di anteprima usando l'endpoint dedicato
         const imageUrl = `/preview/image/${fileHash}`;
@@ -133,6 +361,24 @@ class PreviewModal {
             console.error('Errore caricamento immagine anteprima');
             imgElement.alt = 'Errore caricamento anteprima';
         };
+
+        // Quando l'immagine è caricata, ridimensiona il canvas
+        imgElement.onload = () => {
+            setTimeout(() => {
+                this.resizeCanvas();
+                // Aggiungi listener per resize finestra
+                window.addEventListener('resize', () => {
+                    if (!this.modal.classList.contains('hidden')) {
+                        this.resizeCanvas();
+                    }
+                });
+            }, 100);
+        };
+        
+        // Se l'immagine è già caricata, ridimensiona immediatamente
+        if (imgElement.complete && imgElement.naturalWidth > 0) {
+            setTimeout(() => this.resizeCanvas(), 100);
+        }
 
         // Imposta dati nel form
         document.getElementById('preview-file-hash').value = fileHash || '';
@@ -148,9 +394,16 @@ class PreviewModal {
         const kgValue = parseFloat(extractedData.totale_kg) || 0;
         document.getElementById('preview-totale-kg').value = kgValue.toFixed(3);
 
+        // Reset selezione campo
+        document.getElementById('annotation-field-select').value = '';
+        this.currentField = null;
+
         // Mostra modal
         this.modal.classList.remove('hidden');
         document.body.style.overflow = 'hidden'; // Previeni scroll della pagina
+        
+        // Ridimensiona canvas dopo un breve delay per assicurarsi che il layout sia pronto
+        setTimeout(() => this.resizeCanvas(), 200);
         
         // Verifica che il modal sia effettivamente visibile
         console.log('Modal mostrato, classe hidden:', this.modal.classList.contains('hidden'));
@@ -164,6 +417,13 @@ class PreviewModal {
         // Pulisci immagine per liberare memoria
         const imgElement = document.getElementById('preview-pdf-image');
         imgElement.src = '';
+        
+        // Pulisci annotazioni
+        this.annotations = {};
+        this.currentField = null;
+        if (this.ctx) {
+            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        }
         
         this.currentData = null;
         this.currentFileHash = null;
@@ -193,6 +453,11 @@ class PreviewModal {
         const kgInput = document.getElementById('preview-totale-kg');
         const kgValue = parseFloat(kgInput.value) || 0;
         formData.append('totale_kg', kgValue.toFixed(3));
+        
+        // Aggiungi annotazioni se presenti
+        if (Object.keys(this.annotations).length > 0) {
+            formData.append('annotations', JSON.stringify(this.annotations));
+        }
 
         const saveBtn = document.getElementById('preview-confirm-btn');
         const originalText = saveBtn.textContent;

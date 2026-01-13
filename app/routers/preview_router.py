@@ -191,6 +191,7 @@ async def save_preview(
     numero_documento: str = Form(...),
     totale_kg: str = Form(...),
     original_data: str = Form(None),
+    annotations: str = Form(None),
     auth: bool = Depends(require_authentication)
 ):
     """
@@ -240,8 +241,17 @@ async def save_preview(
         if not file_path:
             file_path = f"temp/preview/{file_hash}_{file_name}"
         
-        # Salva la correzione per l'apprendimento
-        correction_id = save_correction(file_path, original_data_parsed, corrected_data)
+        # Parse annotazioni se presenti
+        annotations_data = None
+        if annotations:
+            try:
+                annotations_data = json.loads(annotations)
+                logger.info(f"Annotazioni ricevute: {len(annotations_data)} campi annotati")
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning(f"Errore parsing annotazioni: {e}")
+        
+        # Salva la correzione per l'apprendimento (con annotazioni)
+        correction_id = save_correction(file_path, original_data_parsed, corrected_data, annotations=annotations_data)
         
         # Salva o aggiorna nel file Excel (evita duplicati)
         was_updated = update_or_append_to_excel(corrected_data)
