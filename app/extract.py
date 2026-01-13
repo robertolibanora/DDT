@@ -218,48 +218,37 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
         pdf_text = text_extraction_result.text if text_extraction_result else ""
         
         # IMPORTANTE: Carica layout rules ad ogni chiamata per garantire consistenza
-        from app.layout_rules.manager import load_layout_rules, match_layout_rule, normalize_sender
+        from app.layout_rules.manager import load_layout_rules, match_layout_rule, normalize_sender, detect_layout_model_advanced
         layout_rules_loaded = load_layout_rules()
         
-        # Estrai e normalizza mittente dal testo per layout rule matching
-        potential_mittente = None
-        potential_mittente_normalized = None
-        
-        # Metodo 1: Estrazione dal testo estratto
-        if pdf_text:
-            try:
-                import re
-                mittente_patterns = [
-                    r'(?:Mittente|Da:|Fornitore|Spett\.le)\s*:?\s*([A-Z][A-Za-z0-9\s&\.]+(?:S\.r\.l\.|S\.p\.A\.|S\.A\.S\.|S\.A\.|SRL|SPA)?)',
-                    r'([A-Z][A-Za-z0-9\s&\.]+)\s*(?:S\.r\.l\.|S\.p\.A\.|S\.A\.S\.|S\.A\.|SRL|SPA)',
-                    r'(?:Mittente|Da:|Fornitore)\s*:?\s*([A-Z][A-Za-z0-9\s&\.]+)',
-                ]
-                for pattern in mittente_patterns:
-                    match = re.search(pattern, pdf_text[:1000], re.IGNORECASE)
-                    if match:
-                        potential_mittente = match.group(1).strip()
-                        # Normalizza: uppercase, rimuovi punteggiatura, collassa spazi
-                        potential_mittente_normalized = normalize_sender(potential_mittente)
-                        logger.debug(f"📄 Mittente estratto dal testo: '{potential_mittente}' (normalizzato: '{potential_mittente_normalized}')")
-                        break
-            except Exception as e:
-                logger.debug(f"Errore estrazione mittente preliminare: {e}")
-        
-        # Prova a matchare una layout rule con il mittente estratto
+        # FASE 1: PRE-DETECTION AVANZATA DEL LAYOUT MODEL
+        # Usa multiple strategie (keyword, nome file, testo) PRIMA dell'estrazione AI
         layout_rule = None
+        layout_rule_name = None
         extraction_mode = None
         box_extracted_data = None  # Inizializza sempre per evitare errori
         
-        if potential_mittente_normalized:
-            layout_rule = match_layout_rule(potential_mittente, page_count)
+        logger.info(f"🔍 Fase pre-detection layout model...")
+        detection_result = detect_layout_model_advanced(pdf_text, file_path, page_count)
         
-        # HARD FAILOVER: Se layout rule matcha, USA SOLO BOX EXTRACTION, NON chiamare LLM
+        if detection_result:
+            layout_rule_name, layout_rule = detection_result
+            logger.info(f"📐 LAYOUT MODEL APPLIED: '{layout_rule_name}'")
+            logger.info(f"   Supplier: '{layout_rule.match.supplier}'")
+            logger.info(f"   Fields: {list(layout_rule.fields.keys())}")
+            extraction_mode = "LAYOUT_MODEL"
+        else:
+            logger.info(f"❌ LAYOUT MODEL SKIPPED: nessun match trovato nella pre-detection")
+            extraction_mode = "AI_FALLBACK"
+        
+        # HARD FAILOVER: Se layout model matcha, USA SOLO BOX EXTRACTION, NON chiamare LLM
         if layout_rule:
-            logger.info(f"📐 Layout rule APPLIED - Using LAYOUT_RULE extraction mode (NO LLM)")
-            extraction_mode = "LAYOUT_RULE"
+            supplier_name = layout_rule.match.supplier
+            logger.info(f"📐 LAYOUT MODEL APPLIED: '{layout_rule_name}' - Using LAYOUT_MODEL extraction mode (NO LLM)")
+            logger.info(f"   Supplier: '{supplier_name}'")
             
             try:
-                box_raw_data = extract_with_layout_rule(file_path, layout_rule, potential_mittente, page_count)
+                box_raw_data = extract_with_layout_rule(file_path, layout_rule, supplier_name, page_count)
                 if box_raw_data:
                     box_extracted_data = normalize_extracted_box_data(box_raw_data)
                     logger.info(f"✅ Dati estratti da box: {list(box_extracted_data.keys())}")
@@ -279,6 +268,7 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
                         result = ddt_data.model_dump()
                         logger.info(f"✅ Dati validati con successo (estrazione box)")
                         logger.info(f"📊 Extraction mode used: {extraction_mode}")
+                        logger.info(f"📐 LAYOUT MODEL APPLIED: '{layout_rule_name}' - Estrazione completata senza AI")
                         return result
                     except ValidationError as e:
                         logger.error(f"❌ Validazione fallita per dati box: {e}")
@@ -295,9 +285,8 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
                 logger.error(f"❌ Fallback to AI extraction")
                 extraction_mode = "AI_FALLBACK"
                 # Continua con AI extraction
-        else:
-            logger.warning(f"❌ No layout rule match for mittente: '{potential_mittente or 'N/A'}'")
-            extraction_mode = "AI_FALLBACK"
+        # Se siamo qui, extraction_mode è già impostato da detect_layout_model_advanced
+        # (LAYOUT_MODEL se matchato, AI_FALLBACK altrimenti)
         
         # Log dettagli estrazione testo
         if text_extraction_result:
@@ -474,11 +463,11 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
         # Normalizza i dati prima della validazione
         normalized_data = _normalize_extracted_data(raw_data)
         
-        # HARD FAILOVER: Se extraction_mode è LAYOUT_RULE, NON dovremmo essere qui
+        # HARD FAILOVER: Se extraction_mode è LAYOUT_MODEL, NON dovremmo essere qui
         # Se siamo qui, significa che extraction_mode è AI_FALLBACK
-        if extraction_mode == "LAYOUT_RULE":
-            logger.error(f"❌ CRITICAL: extraction_mode è LAYOUT_RULE ma siamo nella sezione AI extraction!")
-            logger.error(f"❌ Questo non dovrebbe mai accadere - layout rule dovrebbe aver già restituito")
+        if extraction_mode == "LAYOUT_MODEL":
+            logger.error(f"❌ CRITICAL: extraction_mode è LAYOUT_MODEL ma siamo nella sezione AI extraction!")
+            logger.error(f"❌ Questo non dovrebbe mai accadere - layout model dovrebbe aver già restituito")
             extraction_mode = "AI_FALLBACK"  # Forza fallback per sicurezza
         
         # Applica suggerimenti di apprendimento automatico

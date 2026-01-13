@@ -248,6 +248,104 @@ def match_layout_rule(supplier: str, page_count: Optional[int] = None) -> Option
         return None
 
 
+def detect_layout_model_advanced(
+    pdf_text: str,
+    file_path: str,
+    page_count: Optional[int] = None
+) -> Optional[tuple[str, LayoutRule]]:
+    """
+    Pre-detection avanzata del layout model usando multiple strategie
+    
+    Strategie (in ordine di priorità):
+    1. Keyword matching nel testo (prime righe)
+    2. Nome file matching
+    3. Mittente estratto dal testo (come fallback)
+    
+    Args:
+        pdf_text: Testo estratto dal PDF
+        file_path: Percorso del file PDF
+        page_count: Numero di pagine del documento
+        
+    Returns:
+        Tupla (rule_name, LayoutRule) se trovata, None altrimenti
+    """
+    rules = load_layout_rules()
+    
+    if not rules:
+        logger.debug("⚠️ Nessuna regola di layout disponibile per pre-detection")
+        return None
+    
+    import os
+    import re
+    from pathlib import Path
+    
+    file_name = Path(file_path).stem.lower()
+    logger.info(f"🔍 Layout pre-detection: analizzando file '{file_name}'")
+    
+    # Strategia 1: Keyword matching nel testo (prime 500 caratteri)
+    text_sample = (pdf_text[:500] if pdf_text else "").lower()
+    
+    for rule_name, rule in rules.items():
+        match_criteria = rule.match
+        supplier_original = match_criteria.supplier
+        supplier_normalized = normalize_sender(supplier_original)
+        
+        # Estrai keyword dal nome del supplier (prime 2-3 parole significative)
+        supplier_words = supplier_normalized.split()[:3]
+        keywords = [w for w in supplier_words if len(w) > 3]  # Solo parole > 3 caratteri
+        
+        # Match page_count se specificato
+        if match_criteria.page_count is not None:
+            if page_count != match_criteria.page_count:
+                continue
+        
+        # Test 1: Keyword nel testo
+        if keywords and text_sample:
+            for keyword in keywords:
+                if keyword in text_sample:
+                    logger.info(f"✅ LAYOUT MODEL MATCHED: '{rule_name}' (keyword '{keyword}' trovata nel testo)")
+                    logger.info(f"   Supplier: '{supplier_original}'")
+                    return (rule_name, rule)
+        
+        # Test 2: Nome file contiene supplier
+        if supplier_normalized:
+            # Prova con supplier normalizzato completo
+            if supplier_normalized in file_name:
+                logger.info(f"✅ LAYOUT MODEL MATCHED: '{rule_name}' (nome file contiene supplier)")
+                logger.info(f"   Supplier: '{supplier_original}'")
+                return (rule_name, rule)
+            
+            # Prova con keyword dal supplier
+            for keyword in keywords:
+                if keyword in file_name:
+                    logger.info(f"✅ LAYOUT MODEL MATCHED: '{rule_name}' (nome file contiene keyword '{keyword}')")
+                    logger.info(f"   Supplier: '{supplier_original}'")
+                    return (rule_name, rule)
+        
+        # Test 3: Estrazione mittente dal testo e match
+        if pdf_text:
+            try:
+                mittente_patterns = [
+                    r'(?:Mittente|Da:|Fornitore|Spett\.le)\s*:?\s*([A-Z][A-Za-z0-9\s&\.]+(?:S\.r\.l\.|S\.p\.A\.|S\.A\.S\.|S\.A\.|SRL|SPA)?)',
+                    r'([A-Z][A-Za-z0-9\s&\.]+)\s*(?:S\.r\.l\.|S\.p\.A\.|S\.A\.S\.|S\.A\.|SRL|SPA)',
+                ]
+                for pattern in mittente_patterns:
+                    match = re.search(pattern, pdf_text[:1000], re.IGNORECASE)
+                    if match:
+                        extracted_mittente = match.group(1).strip()
+                        extracted_normalized = normalize_sender(extracted_mittente)
+                        
+                        if extracted_normalized == supplier_normalized:
+                            logger.info(f"✅ LAYOUT MODEL MATCHED: '{rule_name}' (mittente estratto matcha)")
+                            logger.info(f"   Supplier: '{supplier_original}' (estratto: '{extracted_mittente}')")
+                            return (rule_name, rule)
+            except Exception as e:
+                logger.debug(f"Errore estrazione mittente per pre-detection: {e}")
+    
+    logger.info(f"❌ LAYOUT MODEL SKIPPED: nessun match trovato con le strategie disponibili")
+    return None
+
+
 def save_layout_rule(rule_name: str, supplier: str, page_count: Optional[int], fields: Dict[str, Dict[str, Any]]) -> str:
     """
     Salva una nuova regola di layout o aggiorna una esistente
