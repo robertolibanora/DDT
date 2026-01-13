@@ -53,28 +53,28 @@ def extract_field_from_box(
         # Ritaglia il box
         cropped = img.crop((x, y, x + w, y + h))
         
-            # OCR sul box ritagliato
-            if not is_ocr_available():
-                logger.warning("  ⚠️ OCR non disponibile per estrazione box")
-                return None
+        # OCR sul box ritagliato
+        if not is_ocr_available():
+            logger.warning("  ⚠️ OCR non disponibile per estrazione box")
+            return None
+        
+        try:
+            import pytesseract
+            text = pytesseract.image_to_string(
+                cropped,
+                lang='ita+eng',
+                config='--psm 7'  # Singola riga di testo
+            )
             
-            try:
-                import pytesseract
-                text = pytesseract.image_to_string(
-                    cropped,
-                    lang='ita+eng',
-                    config='--psm 7'  # Singola riga di testo
-                )
-                
-                # Pulisci il testo
-                text = text.strip()
-                
-                if text:
-                    logger.debug(f"  ✅ Testo OCR estratto: '{text[:50]}...'")
-                    return text
-                else:
-                    logger.debug(f"  ⚠️ Box vuoto o nessun testo riconosciuto")
-                    return None
+            # Pulisci il testo
+            text = text.strip()
+            
+            if text:
+                logger.debug(f"  ✅ Testo OCR estratto: '{text[:50]}...'")
+                return text
+            else:
+                logger.debug(f"  ⚠️ Box vuoto o nessun testo riconosciuto")
+                return None
                 
         except Exception as e:
             logger.warning(f"Errore OCR su box: {e}")
