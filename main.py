@@ -25,7 +25,13 @@ from app.auth import (
     login_user,
     logout_user
 )
+from fastapi import FastAPI
 
+app = FastAPI()
+
+@app.get("/health", include_in_schema=False)
+def health():
+    return {"status": "ok"}
 # Configura logging
 setup_logging()
 logger = logging.getLogger(__name__)
