@@ -645,6 +645,29 @@
         "numero_documento",
         "totale_kg"
       ]
+    },
+    "3db84707269997155f099b582b307fb7_20251229_103448": {
+      "file_path": "inbox/1000053388_FIORITAL_S.p.A._con_socio_unic_20251229_103427.pdf",
+      "file_name": "1000053388_FIORITAL_S.p.A._con_socio_unic_20251229_103427.pdf",
+      "file_hash": "3db84707269997155f099b582b307fb7",
+      "original_data": {
+        "data": "2025-08-15",
+        "mittente": "FIORITAL S.p.A. con socio unico",
+        "destinatario": "ANTONIO VERRINI SRL",
+        "numero_documento": "1000053388",
+        "totale_kg": 155
+      },
+      "corrected_data": {
+        "data": "2025-08-15",
+        "mittente": "FIORITAL S.p.A. con socio unico",
+        "destinatario": "ANTONIO VERRINI SRL",
+        "numero_documento": "1000053388",
+        "totale_kg": 155.2
+      },
+      "timestamp": "2025-12-29T10:34:48.276516",
+      "fields_changed": [
+        "totale_kg"
+      ]
     }
   },
   "learning_patterns": {

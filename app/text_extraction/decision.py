@@ -70,7 +70,8 @@ def _calculate_readability_score(text: str) -> float:
     isolated_penalty = min(isolated_letters / max(len(text.split()), 1), 0.3)
     
     # Penalizza sequenze di caratteri strani ripetuti
-    strange_patterns = len(re.findall(r'[^\w\s.,;:/-()\[\]{}]{3,}', text))
+    # Nota: il trattino - deve essere escapato o messo alla fine/inizio della classe caratteri
+    strange_patterns = len(re.findall(r'[^\w\s.,;:/()\[\]{}-]{3,}', text))
     strange_penalty = min(strange_patterns * 0.1, 0.2)
     
     final_score = readability_ratio - isolated_penalty - strange_penalty
