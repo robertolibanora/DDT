@@ -248,6 +248,7 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
         # Prova a matchare una layout rule con il mittente estratto
         layout_rule = None
         extraction_mode = None
+        box_extracted_data = None  # Inizializza sempre per evitare errori
         
         if potential_mittente_normalized:
             layout_rule = match_layout_rule(potential_mittente, page_count)
