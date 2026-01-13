@@ -71,10 +71,15 @@ async def save_layout_rule_endpoint(
         if not fields_data:
             raise HTTPException(status_code=400, detail="Deve essere definito almeno un campo")
         
-        # Salva la regola
-        saved_name = save_layout_rule(rule_name, supplier, page_count, fields_data)
+        # Normalizza il supplier per il salvataggio (mantieni originale ma assicura consistenza)
+        supplier_clean = supplier.strip() if supplier else ""
+        if not supplier_clean:
+            raise HTTPException(status_code=400, detail="Il nome del fornitore non può essere vuoto")
         
-        logger.info(f"🎯 Layout rule salvata: {saved_name} per supplier: {supplier}")
+        # Salva la regola
+        saved_name = save_layout_rule(rule_name, supplier_clean, page_count, fields_data)
+        
+        logger.info(f"💾 Layout model saved successfully: {saved_name} for sender: '{supplier_clean}'")
         
         return JSONResponse({
             "success": True,

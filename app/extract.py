@@ -218,26 +218,36 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
         pdf_text = text_extraction_result.text if text_extraction_result else ""
         
         # Estrai un possibile mittente dal testo per layout rule matching
+        # Prova prima con estrazione preliminare dal testo, poi con AI se disponibile
         potential_mittente = None
+        
+        # Metodo 1: Estrazione dal testo estratto
         if pdf_text:
             try:
                 import re
                 mittente_patterns = [
-                    r'(?:Mittente|Da:|Fornitore|Spett\.le)\s*:?\s*([A-Z][A-Za-z0-9\s&\.]+)',
-                    r'([A-Z][A-Za-z0-9\s&\.]+)\s*(?:S\.r\.l\.|S\.p\.A\.|S\.A\.S\.|S\.A\.)',
+                    r'(?:Mittente|Da:|Fornitore|Spett\.le)\s*:?\s*([A-Z][A-Za-z0-9\s&\.]+(?:S\.r\.l\.|S\.p\.A\.|S\.A\.S\.|S\.A\.|SRL|SPA)?)',
+                    r'([A-Z][A-Za-z0-9\s&\.]+)\s*(?:S\.r\.l\.|S\.p\.A\.|S\.A\.S\.|S\.A\.|SRL|SPA)',
+                    r'(?:Mittente|Da:|Fornitore)\s*:?\s*([A-Z][A-Za-z0-9\s&\.]+)',
                 ]
                 for pattern in mittente_patterns:
-                    match = re.search(pattern, pdf_text[:500], re.IGNORECASE)
+                    match = re.search(pattern, pdf_text[:1000], re.IGNORECASE)
                     if match:
                         potential_mittente = match.group(1).strip()
+                        # Pulisci il mittente estratto
+                        potential_mittente = re.sub(r'\s+', ' ', potential_mittente)
+                        logger.debug(f"📄 Mittente estratto dal testo: '{potential_mittente}'")
                         break
             except Exception as e:
                 logger.debug(f"Errore estrazione mittente preliminare: {e}")
         
-        # Prova a matchare una layout rule
+        # Prova a matchare una layout rule con il mittente estratto
         layout_rule = None
         if potential_mittente:
             layout_rule = match_layout_rule(potential_mittente, page_count)
+        
+        # Se non trovato, proviamo anche dopo l'estrazione AI (fallback)
+        # Questo verrà fatto dopo l'estrazione AI se necessario
         
         # Se trovata layout rule, prova estrazione con box
         box_extracted_data = None
@@ -457,6 +467,34 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
         
         # Normalizza i dati prima della validazione
         normalized_data = _normalize_extracted_data(raw_data)
+        
+        # Se non avevamo trovato una layout rule prima, proviamo ora con il mittente estratto dall'AI
+        if not layout_rule and normalized_data.get('mittente'):
+            ai_mittente = normalized_data.get('mittente', '').strip()
+            if ai_mittente and ai_mittente != "Non specificato":
+                logger.info(f"🔍 Retry layout rule matching con mittente da AI: '{ai_mittente}'")
+                layout_rule_retry = match_layout_rule(ai_mittente, page_count)
+                
+                # Se trovato ora, prova estrazione con box (ma solo se non abbiamo già dati)
+                if layout_rule_retry and not box_extracted_data:
+                    logger.info(f"🎯 Layout rule trovata con mittente AI, provo estrazione con box")
+                    try:
+                        box_raw_data_retry = extract_with_layout_rule(file_path, layout_rule_retry, ai_mittente, page_count)
+                        if box_raw_data_retry:
+                            box_extracted_data = normalize_extracted_box_data(box_raw_data_retry)
+                            logger.info(f"✅ Dati estratti da box (retry): {list(box_extracted_data.keys())}")
+                            
+                            # Verifica campi mancanti
+                            required_fields = {'data', 'mittente', 'destinatario', 'numero_documento', 'totale_kg'}
+                            missing_fields_retry = required_fields - set(box_extracted_data.keys())
+                            
+                            if not missing_fields_retry:
+                                logger.info("✅ Tutti i campi estratti da box (retry), salto chiamata AI")
+                            else:
+                                logger.info(f"⚠️ Campi mancanti da box (retry): {missing_fields_retry}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ Errore estrazione con layout rule (retry): {e}")
+                        box_extracted_data = None
         
         # Se abbiamo dati estratti dai box, merge con i dati AI (box hanno priorità)
         if box_extracted_data:

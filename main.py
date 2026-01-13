@@ -235,6 +235,26 @@ async def lifespan(app: FastAPI):
         os.makedirs(inbox_path, exist_ok=True)
         logger.info(f"📁 Cartella inbox creata: {inbox_path}")
     
+    # Carica layout models all'avvio per loggare disponibilità
+    try:
+        from app.layout_rules.manager import load_layout_rules
+        rules = load_layout_rules()
+        if rules:
+            logger.info(f"📐 Layout models disponibili all'avvio: {len(rules)} modello(i)")
+            # Log per mittente
+            from app.layout_rules.manager import normalize_sender
+            sender_counts = {}
+            for rule_name, rule in rules.items():
+                supplier = rule.match.supplier
+                sender_norm = normalize_sender(supplier)
+                sender_counts[sender_norm] = sender_counts.get(sender_norm, 0) + 1
+            for sender_norm, count in sender_counts.items():
+                logger.info(f"   📦 Loaded {count} layout model(s) for sender: {sender_norm}")
+        else:
+            logger.info("📐 Nessun layout model disponibile all'avvio")
+    except Exception as e:
+        logger.warning(f"⚠️ Errore caricamento layout models all'avvio: {e}")
+    
     # Startup - avvia il watchdog in background
     observer = Observer()
     try:

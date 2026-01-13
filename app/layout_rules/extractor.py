@@ -45,7 +45,7 @@ def extract_field_from_box(
         w = max(1, min(w, image_width - x))
         h = max(1, min(h, image_height - y))
         
-        logger.debug(f"📦 Estrazione campo da box: x={x}, y={y}, w={w}, h={h}")
+        logger.debug(f"  📦 Box coordinates: x={x}, y={y}, w={w}, h={h}")
         
         # Carica l'immagine
         img = Image.open(image_path)
@@ -53,28 +53,28 @@ def extract_field_from_box(
         # Ritaglia il box
         cropped = img.crop((x, y, x + w, y + h))
         
-        # OCR sul box ritagliato
-        if not is_ocr_available():
-            logger.warning("OCR non disponibile per estrazione box")
-            return None
-        
-        try:
-            import pytesseract
-            text = pytesseract.image_to_string(
-                cropped,
-                lang='ita+eng',
-                config='--psm 7'  # Singola riga di testo
-            )
-            
-            # Pulisci il testo
-            text = text.strip()
-            
-            if text:
-                logger.info(f"✅ Campo estratto da box: '{text[:50]}...'")
-                return text
-            else:
-                logger.debug(f"⚠️ Box vuoto o nessun testo riconosciuto")
+            # OCR sul box ritagliato
+            if not is_ocr_available():
+                logger.warning("  ⚠️ OCR non disponibile per estrazione box")
                 return None
+            
+            try:
+                import pytesseract
+                text = pytesseract.image_to_string(
+                    cropped,
+                    lang='ita+eng',
+                    config='--psm 7'  # Singola riga di testo
+                )
+                
+                # Pulisci il testo
+                text = text.strip()
+                
+                if text:
+                    logger.debug(f"  ✅ Testo OCR estratto: '{text[:50]}...'")
+                    return text
+                else:
+                    logger.debug(f"  ⚠️ Box vuoto o nessun testo riconosciuto")
+                    return None
                 
         except Exception as e:
             logger.warning(f"Errore OCR su box: {e}")
@@ -103,7 +103,8 @@ def extract_with_layout_rule(
     Returns:
         Dizionario con i dati estratti (può essere parziale, con fallback necessario)
     """
-    logger.info(f"🎯 Estrazione con layout rule per supplier: {supplier}")
+    logger.info(f"📦 Applying layout-based extraction for sender: '{supplier}'")
+    logger.info(f"   Campi definiti nel modello: {list(layout_rule.fields.keys())}")
     
     # Converti PDF in PNG (prima pagina)
     try:
@@ -159,22 +160,28 @@ def extract_with_layout_rule(
     
     # Estrai campi dai box
     extracted_data = {}
+    fields_extracted = 0
+    fields_failed = 0
     
     try:
         for field_name, field_box in layout_rule.fields.items():
             # Verifica che la pagina sia corretta (per ora solo pagina 1)
             if field_box.page != 1:
-                logger.debug(f"Campo {field_name} su pagina {field_box.page}, salto (solo pagina 1 supportata)")
+                logger.debug(f"  ⏭️ Campo {field_name} su pagina {field_box.page}, salto (solo pagina 1 supportata)")
                 continue
             
-            logger.info(f"📦 Estrazione campo da box: {field_name}")
+            logger.debug(f"  📦 Estrazione campo da box: {field_name}")
             text = extract_field_from_box(tmp_path, field_box, image_width, image_height)
             
-            if text:
-                extracted_data[field_name] = text
-                logger.info(f"✅ Campo estratto da box: {field_name} = '{text[:50]}...'")
+            if text and text.strip():
+                extracted_data[field_name] = text.strip()
+                fields_extracted += 1
+                logger.info(f"  ✅ Campo estratto da box: {field_name} = '{text[:50]}...'")
             else:
-                logger.warning(f"⚠️ Campo vuoto da box: {field_name}")
+                fields_failed += 1
+                logger.warning(f"  ⚠️ Campo vuoto o non riconosciuto da box: {field_name}")
+        
+        logger.info(f"📊 Estrazione box completata: {fields_extracted} campi estratti, {fields_failed} falliti")
         
         # Pulisci file temporaneo
         import os
