@@ -16,7 +16,7 @@ from app.extract import extract_from_pdf, generate_preview_png
 from app.excel import append_to_excel, read_excel_as_dict, clear_all_ddt
 from app.config import INBOX_DIR, SERVER_IP
 from app.logging_config import setup_logging
-from app.routers import rules_router, reprocess_router, preview_router, layout_router
+from app.routers import rules_router, reprocess_router, preview_router, layout_router, models_router
 from app.corrections import get_file_hash
 from app.auth import (
     get_session_middleware,
@@ -472,11 +472,20 @@ async def layout_trainer_page(request: Request):
         return RedirectResponse(url="/login", status_code=302)
     return templates.TemplateResponse("layout_trainer.html", {"request": request})
 
+@app.get("/models", response_class=HTMLResponse)
+async def models_page(request: Request):
+    """Pagina per visualizzare i modelli di layout salvati"""
+    # Verifica autenticazione e reindirizza se necessario
+    if not is_authenticated(request):
+        return RedirectResponse(url="/login", status_code=302)
+    return templates.TemplateResponse("models.html", {"request": request})
+
 # Include i router per regole, reprocessing e anteprima (dopo le route HTML per evitare conflitti)
 app.include_router(rules_router.router)
 app.include_router(reprocess_router.router)
 app.include_router(preview_router.router)
 app.include_router(layout_router.router)
+app.include_router(models_router.router)
 
 @app.get("/data")
 async def get_data(request: Request, auth: bool = Depends(check_auth)):

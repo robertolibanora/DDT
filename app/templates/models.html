@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+
+{% block title %}Modelli Layout{% endblock %}
+
+{% block header_title %}📐 Modelli Layout{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/models.css">
+{% endblock %}
+
+{% block content %}
+    <div class="card">
+        <h2>📐 Modelli di Layout Salvati</h2>
+        <p class="page-description">
+            Questi modelli vengono utilizzati automaticamente per estrarre i dati dai DDT quando il mittente corrisponde.
+            Ogni modello definisce la posizione dei campi tramite riquadri grafici.
+        </p>
+        
+        <div id="loading" class="loading">
+            <span class="spinner"></span>
+            Caricamento modelli...
+        </div>
+        
+        <div id="models-container" class="models-grid hidden">
+            <!-- I modelli verranno inseriti qui dinamicamente -->
+        </div>
+        
+        <div id="empty-state" class="empty-state hidden">
+            <p>🌊 Nessun modello salvato</p>
+            <p>Usa il <a href="/layout-trainer">Layout Trainer</a> per creare il primo modello.</p>
+        </div>
+    </div>
+    
+    <!-- Modal per anteprima modello -->
+    <div id="preview-modal" class="model-preview-modal hidden">
+        <div class="model-preview-overlay"></div>
+        <div class="model-preview-container">
+            <div class="model-preview-header">
+                <h3 id="preview-model-name">Anteprima Modello</h3>
+                <button class="model-preview-close" id="preview-close-btn">✕</button>
+            </div>
+            <div class="model-preview-content">
+                <div class="preview-info">
+                    <p><strong>Mittente:</strong> <span id="preview-supplier"></span></p>
+                    <p><strong>Campi definiti:</strong> <span id="preview-fields-count"></span></p>
+                    <p><strong>Stato:</strong> <span id="preview-status"></span></p>
+                </div>
+                <div class="preview-canvas-container">
+                    <canvas id="preview-canvas"></canvas>
+                    <p class="preview-note">⚠️ L'immagine di esempio non è disponibile. I box sono mostrati su un'area generica.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block scripts %}
+    <script src="/static/js/models.js"></script>
+{% endblock %}

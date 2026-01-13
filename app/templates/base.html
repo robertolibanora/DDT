@@ -20,6 +20,7 @@
             <a href="/dashboard" id="nav-dashboard" aria-label="Vai alla dashboard">📊 Dashboard</a>
             <a href="/upload" id="nav-upload" aria-label="Carica un nuovo DDT">📤 Carica</a>
             <a href="/rules" id="nav-rules" aria-label="Gestisci le regole">⚙️ Regole</a>
+            <a href="/models" id="nav-models" aria-label="Visualizza i modelli di layout">📐 Modelli</a>
             <a href="/logout" id="nav-logout" style="margin-left: auto;" aria-label="Esci dal sistema">🚪 Logout</a>
         </nav>
         {% block header_extra %}{% endblock %}
@@ -44,6 +45,7 @@
             const navUpload = document.getElementById('nav-upload');
             const navDashboard = document.getElementById('nav-dashboard');
             const navRules = document.getElementById('nav-rules');
+            const navModels = document.getElementById('nav-models');
             
             if (path === '/dashboard') {
                 if (navDashboard) navDashboard.classList.add('active');
@@ -51,6 +53,8 @@
                 if (navUpload) navUpload.classList.add('active');
             } else if (path === '/rules') {
                 if (navRules) navRules.classList.add('active');
+            } else if (path === '/models') {
+                if (navModels) navModels.classList.add('active');
             }
         })();
     </script>
