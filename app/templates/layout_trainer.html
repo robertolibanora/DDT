@@ -122,20 +122,41 @@
         }
         
         function loadImageFromUrl(url, hash) {
+            // Verifica che layoutTrainer sia inizializzato
+            if (!layoutTrainer) {
+                console.error('LayoutTrainer non ancora inizializzato');
+                showMessage('⚠️ Errore: sistema non ancora pronto. Ricarica la pagina.', 'error');
+                return;
+            }
+            
             fileHash = hash;
             imageUrl = url;
             
             // Mostra il canvas e nascondi il messaggio
-            document.getElementById('canvas-container').style.display = 'block';
-            document.getElementById('no-image-message').style.display = 'none';
+            const canvasContainer = document.getElementById('canvas-container');
+            const noImageMessage = document.getElementById('no-image-message');
+            
+            if (canvasContainer) {
+                canvasContainer.style.display = 'block';
+            }
+            if (noImageMessage) {
+                noImageMessage.style.display = 'none';
+            }
             
             // Carica immagine
             layoutTrainer.loadImage(imageUrl).then(() => {
-                console.log('Immagine caricata');
+                console.log('Immagine caricata con successo dall\'anteprima');
                 showMessage('✅ Immagine caricata con successo', 'success');
             }).catch(err => {
                 console.error('Errore caricamento immagine:', err);
-                showMessage('Errore caricamento immagine', 'error');
+                showMessage('❌ Errore caricamento immagine: ' + err.message, 'error');
+                // Mostra di nuovo il messaggio "nessun documento" in caso di errore
+                if (canvasContainer) {
+                    canvasContainer.style.display = 'none';
+                }
+                if (noImageMessage) {
+                    noImageMessage.style.display = 'block';
+                }
             });
         }
         
@@ -196,26 +217,52 @@
         });
         
         // Carica immagine se fornita come parametro URL
-        const urlParams = new URLSearchParams(window.location.search);
-        const hashParam = urlParams.get('hash');
-        const supplierParam = urlParams.get('supplier');
-        
-        if (hashParam) {
-            fileHash = hashParam;
-            imageUrl = `/preview/image/${hashParam}`;
-            supplier = supplierParam || '';
+        // Aspetta che layoutTrainer sia inizializzato
+        function initFromUrlParams() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const hashParam = urlParams.get('hash');
+            const supplierParam = urlParams.get('supplier');
             
-            // Precompila il campo fornitore se disponibile
-            if (supplier) {
-                document.getElementById('supplier-input').value = supplier;
+            if (hashParam) {
+                // Verifica che layoutTrainer sia disponibile
+                if (typeof layoutTrainer === 'undefined' || !layoutTrainer) {
+                    console.log('LayoutTrainer non ancora disponibile, riprovo tra 100ms...');
+                    setTimeout(initFromUrlParams, 100);
+                    return;
+                }
+                
+                fileHash = hashParam;
+                imageUrl = `/preview/image/${hashParam}`;
+                supplier = supplierParam || '';
+                
+                // Precompila il campo fornitore se disponibile
+                if (supplier) {
+                    const supplierInput = document.getElementById('supplier-input');
+                    if (supplierInput) {
+                        supplierInput.value = supplier;
+                    }
+                }
+                
+                // Genera nome regola automatico
+                const ruleName = supplier ? `${supplier.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_layout_v1` : 'layout_v1';
+                const ruleNameInput = document.getElementById('rule-name-input');
+                if (ruleNameInput) {
+                    ruleNameInput.value = ruleName;
+                }
+                
+                // Carica immagine
+                loadImageFromUrl(imageUrl, hashParam);
             }
-            
-            // Genera nome regola automatico
-            const ruleName = supplier ? `${supplier.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_layout_v1` : 'layout_v1';
-            document.getElementById('rule-name-input').value = ruleName;
-            
-            // Carica immagine
-            loadImageFromUrl(imageUrl, hashParam);
+        }
+        
+        // Aspetta che il DOM sia pronto prima di inizializzare
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => {
+                setTimeout(initFromUrlParams, 200);
+            });
+        } else {
+            // DOM già pronto
+            setTimeout(initFromUrlParams, 200);
         }
         
         document.getElementById('btn-save-layout').addEventListener('click', async () => {

@@ -63,9 +63,13 @@ class LayoutTrainer {
         return new Promise((resolve, reject) => {
             this.imgElement = new Image();
             this.imgElement.onload = () => {
-                // Imposta dimensioni canvas
+                // Imposta dimensioni reali del canvas (in pixel)
+                // Queste sono le dimensioni interne del canvas, usate per il rendering
                 this.canvas.width = this.imgElement.width;
                 this.canvas.height = this.imgElement.height;
+                
+                // Lascia che il CSS gestisca il ridimensionamento visualizzato
+                // Il canvas verrà ridimensionato automaticamente da max-width: 100%
                 this.imageLoaded = true;
                 this.draw();
                 resolve();
@@ -146,13 +150,33 @@ class LayoutTrainer {
     
     getMousePos(e) {
         const rect = this.canvas.getBoundingClientRect();
-        // Calcola il rapporto tra dimensioni CSS e dimensioni reali del canvas
-        const scaleX = this.canvas.width / rect.width;
-        const scaleY = this.canvas.height / rect.height;
+        const style = window.getComputedStyle(this.canvas);
         
+        // Ottieni il border width
+        const borderLeft = parseFloat(style.borderLeftWidth) || 0;
+        const borderTop = parseFloat(style.borderTopWidth) || 0;
+        
+        // Coordinate del mouse relative al canvas visualizzato
+        // Sottrai il border perché il contenuto del canvas inizia dopo il border
+        const x = e.clientX - rect.left - borderLeft;
+        const y = e.clientY - rect.top - borderTop;
+        
+        // Calcola le dimensioni del contenuto del canvas (escluso border)
+        const contentWidth = rect.width - (borderLeft + parseFloat(style.borderRightWidth) || 0);
+        const contentHeight = rect.height - (borderTop + parseFloat(style.borderBottomWidth) || 0);
+        
+        // Calcola il rapporto tra dimensioni reali del canvas e dimensioni visualizzate del contenuto
+        const scaleX = this.canvas.width / contentWidth;
+        const scaleY = this.canvas.height / contentHeight;
+        
+        // Applica lo scaling alle coordinate
+        const canvasX = x * scaleX;
+        const canvasY = y * scaleY;
+        
+        // Assicurati che le coordinate siano dentro i limiti del canvas
         return {
-            x: (e.clientX - rect.left) * scaleX,
-            y: (e.clientY - rect.top) * scaleY
+            x: Math.max(0, Math.min(this.canvas.width, Math.round(canvasX))),
+            y: Math.max(0, Math.min(this.canvas.height, Math.round(canvasY)))
         };
     }
     
