@@ -465,6 +465,125 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
         raise ValueError(f"Errore durante l'elaborazione del PDF: {str(e)}") from e
 
 
+def generate_preview_png(file_path: str, file_hash: str, output_dir: str = "temp/preview") -> Optional[str]:
+    """
+    Genera e salva una PNG di anteprima dalla prima pagina del PDF
+    
+    Args:
+        file_path: Percorso del file PDF
+        file_hash: Hash del file (usato come nome file PNG)
+        output_dir: Directory dove salvare la PNG (default: temp/preview)
+        
+    Returns:
+        Percorso del file PNG salvato o None se fallito
+    """
+    from pathlib import Path
+    
+    try:
+        # Leggi il file PDF
+        with open(file_path, "rb") as f:
+            pdf_bytes = f.read()
+        
+        if not pdf_bytes:
+            logger.warning(f"File PDF vuoto: {file_path}")
+            return None
+        
+        # Crea directory se non esiste
+        preview_dir = Path(output_dir)
+        preview_dir.mkdir(parents=True, exist_ok=True)
+        
+        png_path = preview_dir / f"{file_hash}.png"
+        
+        # Se esiste già, restituisci il percorso
+        if png_path.exists():
+            logger.debug(f"PNG anteprima già esistente: {png_path}")
+            return str(png_path)
+        
+        img_bytes = None
+        
+        # Metodo 1: Prova con PyMuPDF (fitz) - migliore per Windows
+        try:
+            import fitz  # PyMuPDF
+            
+            logger.info(f"Generazione PNG anteprima con PyMuPDF per {file_path}...")
+            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            if len(doc) == 0:
+                raise ValueError("PDF vuoto o non valido")
+            
+            # Converti la prima pagina in immagine
+            page = doc[0]
+            # Matrice di trasformazione per DPI 200 (200/72 = 2.78)
+            zoom = 200 / 72.0
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat)
+            
+            # Converti in PNG
+            img_bytes = pix.tobytes("png")
+            doc.close()
+            logger.info(f"PNG generata con PyMuPDF ({len(img_bytes)} bytes)")
+            
+        except ImportError:
+            logger.warning("PyMuPDF non disponibile, provo con pdf2image...")
+            # Metodo 2: Fallback a pdf2image
+            try:
+                from pdf2image import convert_from_bytes
+                from io import BytesIO
+                
+                logger.info(f"Generazione PNG anteprima con pdf2image per {file_path}...")
+                images = convert_from_bytes(pdf_bytes, first_page=1, last_page=1, dpi=200)
+                if not images:
+                    raise ValueError("Impossibile convertire il PDF in immagine")
+                
+                img_buffer = BytesIO()
+                images[0].save(img_buffer, format='PNG')
+                img_bytes = img_buffer.getvalue()
+                logger.info(f"PNG generata con pdf2image ({len(img_bytes)} bytes)")
+                
+            except ImportError:
+                logger.error("Nessuna libreria disponibile per convertire PDF. Installa PyMuPDF (consigliato) o pdf2image+Poppler")
+                return None
+            except Exception as e:
+                logger.error(f"Errore conversione PDF con pdf2image: {e}")
+                return None
+        except Exception as e:
+            logger.warning(f"Errore conversione PDF con PyMuPDF: {e}, provo fallback...")
+            # Fallback a pdf2image se PyMuPDF fallisce
+            try:
+                from pdf2image import convert_from_bytes
+                from io import BytesIO
+                
+                logger.info(f"Generazione PNG anteprima con pdf2image (fallback) per {file_path}...")
+                images = convert_from_bytes(pdf_bytes, first_page=1, last_page=1, dpi=200)
+                if not images:
+                    raise ValueError("Impossibile convertire il PDF in immagine")
+                
+                img_buffer = BytesIO()
+                images[0].save(img_buffer, format='PNG')
+                img_bytes = img_buffer.getvalue()
+                logger.info(f"PNG generata con pdf2image (fallback) ({len(img_bytes)} bytes)")
+            except Exception as e2:
+                logger.error(f"Errore conversione PDF: PyMuPDF fallito ({e}), pdf2image fallito ({e2})")
+                return None
+        
+        if not img_bytes:
+            logger.error("Impossibile generare PNG anteprima")
+            return None
+        
+        # Salva la PNG
+        with open(png_path, 'wb') as f:
+            f.write(img_bytes)
+        
+        logger.info(f"✅ PNG anteprima salvata: {png_path} ({len(img_bytes)} bytes)")
+        return str(png_path)
+        
+    except FileNotFoundError:
+        logger.error(f"File PDF non trovato: {file_path}")
+        return None
+    except Exception as e:
+        logger.error(f"Errore generazione PNG anteprima: {e}", exc_info=True)
+        return None
+
+
 def _normalize_extracted_data(raw_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Normalizza i dati grezzi estratti prima della validazione Pydantic

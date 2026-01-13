@@ -14,6 +14,7 @@ from app.corrections import save_correction, get_file_hash
 from app.excel import update_or_append_to_excel
 from app.config import INBOX_DIR
 from app.watchdog_queue import get_all_items, mark_as_processed
+from app.extract import generate_preview_png
 
 # Directory temporanea per i file di anteprima
 TEMP_PREVIEW_DIR = Path("temp/preview")
@@ -179,6 +180,73 @@ async def get_preview_image(
 
 # La pagina /preview è stata rimossa - l'anteprima è ora integrata come modal globale
 # L'estrazione avviene tramite /upload, manteniamo solo l'endpoint di salvataggio
+
+@router.get("/image/{file_hash}")
+async def get_preview_image(
+    file_hash: str,
+    request: Request,
+    auth: bool = Depends(require_authentication)
+):
+    """
+    Serve l'immagine PNG di anteprima del DDT
+    
+    Args:
+        file_hash: Hash del file PDF
+        
+    Returns:
+        FileResponse con la PNG o 404 se non trovata
+    """
+    try:
+        png_path = TEMP_PREVIEW_DIR / f"{file_hash}.png"
+        
+        # Se la PNG non esiste, prova a generarla dal PDF
+        if not png_path.exists():
+            logger.info(f"PNG anteprima non trovata per hash {file_hash}, provo a generarla...")
+            
+            # Cerca il PDF nella cartella inbox
+            inbox_path = Path(INBOX_DIR)
+            pdf_file = None
+            
+            if inbox_path.exists():
+                for pdf_path in inbox_path.glob("*.pdf"):
+                    try:
+                        if get_file_hash(str(pdf_path)) == file_hash:
+                            pdf_file = pdf_path
+                            break
+                    except Exception:
+                        continue
+            
+            if pdf_file and pdf_file.exists():
+                # Genera la PNG
+                generated_path = generate_preview_png(str(pdf_file), file_hash, str(TEMP_PREVIEW_DIR))
+                if generated_path:
+                    png_path = Path(generated_path)
+                else:
+                    logger.warning(f"Impossibile generare PNG per {file_hash}")
+                    raise HTTPException(status_code=404, detail="Anteprima non disponibile")
+            else:
+                logger.warning(f"PDF non trovato per hash {file_hash}")
+                raise HTTPException(status_code=404, detail="File PDF non trovato")
+        
+        if not png_path.exists():
+            raise HTTPException(status_code=404, detail="Anteprima non trovata")
+        
+        # Restituisci la PNG con headers corretti
+        return FileResponse(
+            path=str(png_path),
+            media_type="image/png",
+            headers={
+                "Content-Disposition": "inline",
+                "Cache-Control": "no-store"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Errore servizio PNG anteprima: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Errore durante il caricamento dell'anteprima: {str(e)}")
+
 
 @router.post("/save")
 async def save_preview(

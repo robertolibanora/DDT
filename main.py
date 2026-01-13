@@ -12,7 +12,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
-from app.extract import extract_from_pdf
+from app.extract import extract_from_pdf, generate_preview_png
 from app.excel import append_to_excel, read_excel_as_dict, clear_all_ddt
 from app.config import INBOX_DIR, SERVER_IP
 from app.logging_config import setup_logging
@@ -165,6 +165,16 @@ class DDTHandler(FileSystemEventHandler):
             
             # Converti PDF in base64
             pdf_base64 = base64.b64encode(pdf_bytes).decode()
+            
+            # Genera PNG di anteprima
+            try:
+                preview_path = generate_preview_png(file_path, file_hash)
+                if preview_path:
+                    logger.info(f"✅ PNG anteprima generata: {preview_path}")
+                else:
+                    logger.warning(f"⚠️ Impossibile generare PNG anteprima per {file_hash}")
+            except Exception as e:
+                logger.warning(f"⚠️ Errore generazione PNG anteprima: {e}")
             
             # Aggiungi alla coda per l'anteprima
             queue_id = add_to_queue(file_path, data, pdf_base64, file_hash)
@@ -390,6 +400,17 @@ async def upload_ddt(request: Request, file: UploadFile = File(...), auth: bool 
             # Copia il file nella cartella inbox
             shutil.copy2(tmp_path, inbox_saved_path)
             logger.info(f"📁 Copia salvata in inbox: {inbox_saved_path.name}")
+            
+            # Genera PNG di anteprima se abbiamo l'hash
+            if file_hash:
+                try:
+                    preview_path = generate_preview_png(str(inbox_saved_path), file_hash)
+                    if preview_path:
+                        logger.info(f"✅ PNG anteprima generata: {preview_path}")
+                    else:
+                        logger.warning(f"⚠️ Impossibile generare PNG anteprima per {file_hash}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Errore generazione PNG anteprima: {e}")
             
             # Converti PDF in base64 per visualizzarlo
             pdf_base64 = base64.b64encode(content).decode()

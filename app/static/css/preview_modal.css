@@ -375,7 +375,8 @@
     }
     
     .preview-pdf-container {
-        height: 400px;
+        min-height: 300px;
+        max-height: 400px;
     }
 }
 
@@ -418,7 +419,8 @@
     }
     
     .preview-pdf-container {
-        height: 300px;
+        min-height: 200px;
+        max-height: 300px;
     }
     
     .preview-form-section input {
