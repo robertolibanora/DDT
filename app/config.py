@@ -10,9 +10,9 @@ EXCEL_FILE = "ddt.xlsx"
 INBOX_DIR = "inbox"
 
 # Credenziali amministratore
-ADMIN_USERNAME = os.getenv("ADMIN", "admin")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
-SESSION_SECRET_KEY = os.getenv("SESSION_SECRET_KEY", "your-secret-key-change-in-production")
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD")
+SESSION_SECRET_KEY = os.getenv("SESSION_SECRET_KEY")
 
 # Configurazione IP - calcola automaticamente l'IP locale
 def get_local_ip():
