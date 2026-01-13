@@ -14,6 +14,62 @@ logger = logging.getLogger(__name__)
 LAYOUT_RULES_FILE = Path(__file__).parent / "layout_rules.json"
 
 
+# Soglia di similarità configurabile per fuzzy matching
+LAYOUT_MODEL_SIMILARITY_THRESHOLD = 0.6
+
+
+def calculate_sender_similarity(sender1: str, sender2: str) -> float:
+    """
+    Calcola la similarità tra due mittenti usando multiple strategie
+    
+    Strategie combinate:
+    1. SequenceMatcher (difflib) - matching sequenziale
+    2. Token overlap - matching basato su parole comuni
+    3. Ignora parole non discriminanti (SRL, SPA, ecc.)
+    
+    Args:
+        sender1: Primo mittente (normalizzato)
+        sender2: Secondo mittente (normalizzato)
+        
+    Returns:
+        Score di similarità tra 0.0 e 1.0
+    """
+    import difflib
+    
+    if not sender1 or not sender2:
+        return 0.0
+    
+    # Parole non discriminanti da ignorare nel matching
+    stop_words = {'srl', 'spa', 'sas', 'snc', 'srl', 'spa', 'sas', 'snc', 
+                  'societa', 'società', 'con', 'socio', 'unico', 'di', 'da', 
+                  'e', 'il', 'la', 'le', 'un', 'una', 'per', 'in', 'a'}
+    
+    # Tokenizza e filtra stop words
+    def tokenize_and_filter(text: str) -> set:
+        tokens = set(text.lower().split())
+        return tokens - stop_words
+    
+    tokens1 = tokenize_and_filter(sender1)
+    tokens2 = tokenize_and_filter(sender2)
+    
+    # Calcola token overlap (Jaccard similarity)
+    if tokens1 or tokens2:
+        intersection = tokens1 & tokens2
+        union = tokens1 | tokens2
+        token_similarity = len(intersection) / len(union) if union else 0.0
+    else:
+        token_similarity = 0.0
+    
+    # Calcola sequence similarity (difflib)
+    sequence_similarity = difflib.SequenceMatcher(None, sender1.lower(), sender2.lower()).ratio()
+    
+    # Combina i due score (media pesata: 60% token, 40% sequence)
+    # Token overlap è più robusto per variazioni OCR
+    combined_similarity = (token_similarity * 0.6) + (sequence_similarity * 0.4)
+    
+    return combined_similarity
+
+
 def normalize_sender(name: str) -> str:
     """
     Normalizza il nome del mittente per il matching deterministico
@@ -190,16 +246,21 @@ def save_layout_rules(rules: Dict[str, LayoutRule]):
         raise
 
 
-def match_layout_rule(supplier: str, page_count: Optional[int] = None) -> Optional[LayoutRule]:
+def match_layout_rule(
+    supplier: str, 
+    page_count: Optional[int] = None,
+    similarity_threshold: float = LAYOUT_MODEL_SIMILARITY_THRESHOLD
+) -> Optional[LayoutRule]:
     """
-    Trova una regola di layout che corrisponde ai criteri forniti
+    Trova una regola di layout usando FUZZY MATCHING robusto
     
     Args:
-        supplier: Nome del fornitore (mittente)
+        supplier: Nome del fornitore (mittente) - può avere variazioni OCR/formattazione
         page_count: Numero di pagine del documento (opzionale)
+        similarity_threshold: Soglia minima di similarità (default: 0.6)
         
     Returns:
-        LayoutRule se trovata, None altrimenti
+        LayoutRule se trovata con similarity >= threshold, None altrimenti
     """
     if not supplier or not supplier.strip():
         logger.debug("⚠️ Supplier vuoto, nessun matching possibile")
@@ -213,17 +274,14 @@ def match_layout_rule(supplier: str, page_count: Optional[int] = None) -> Option
     
     normalized_supplier = normalize_sender(supplier)
     
-    logger.info(f"🔍 Ricerca layout rule per sender: '{supplier}' (normalizzato: '{normalized_supplier}'), pagine: {page_count}")
+    logger.info(f"🔍 Fuzzy matching layout rule per sender: '{supplier}' (normalizzato: '{normalized_supplier}'), pagine: {page_count}, threshold: {similarity_threshold:.2f}")
     
-    matched_rules = []
+    candidate_rules = []
     
     for rule_name, rule in rules.items():
         match_criteria = rule.match
-        normalized_rule_supplier = normalize_sender(match_criteria.supplier)
-        
-        # Match supplier (deve corrispondere esattamente dopo normalizzazione)
-        if normalized_rule_supplier != normalized_supplier:
-            continue
+        rule_supplier_original = match_criteria.supplier
+        normalized_rule_supplier = normalize_sender(rule_supplier_original)
         
         # Match page_count (se specificato nella regola)
         if match_criteria.page_count is not None:
@@ -231,40 +289,60 @@ def match_layout_rule(supplier: str, page_count: Optional[int] = None) -> Option
                 logger.debug(f"  ⏭️ Regola {rule_name}: page_count mismatch ({match_criteria.page_count} vs {page_count})")
                 continue
         
-        matched_rules.append((rule_name, rule))
+        # Calcola similarity usando fuzzy matching
+        similarity = calculate_sender_similarity(normalized_supplier, normalized_rule_supplier)
+        
+        logger.info(f"  📊 Modello candidato: '{rule_name}'")
+        logger.info(f"     Supplier modello: '{rule_supplier_original}' (normalizzato: '{normalized_rule_supplier}')")
+        logger.info(f"     Similarity score: {similarity:.3f} {'✅' if similarity >= similarity_threshold else '❌'}")
+        
+        if similarity >= similarity_threshold:
+            candidate_rules.append((rule_name, rule, similarity))
     
-    if matched_rules:
-        # Prendi la prima regola matchata (potremmo migliorare con priorità)
-        rule_name, rule = matched_rules[0]
-        logger.info(f"📐 Layout rule APPLIED for mittente: '{supplier}' (normalizzato: '{normalized_supplier}')")
-        logger.info(f"   Rule name: {rule_name}")
-        logger.debug(f"   Rule details - Fields: {list(rule.fields.keys())}")
-        logger.debug(f"   Rule details - Box coordinates:")
-        for field_name, field_box in rule.fields.items():
-            logger.debug(f"     {field_name}: page={field_box.page}, x_pct={field_box.box.x_pct:.4f}, y_pct={field_box.box.y_pct:.4f}, w_pct={field_box.box.w_pct:.4f}, h_pct={field_box.box.h_pct:.4f}")
+    if candidate_rules:
+        # Seleziona il modello con similarity più alta
+        candidate_rules.sort(key=lambda x: x[2], reverse=True)
+        rule_name, rule, best_similarity = candidate_rules[0]
+        
+        logger.info(f"✅ LAYOUT MODEL MATCHED: '{rule_name}'")
+        logger.info(f"   Supplier estratto: '{supplier}' (normalizzato: '{normalized_supplier}')")
+        logger.info(f"   Supplier modello: '{rule.match.supplier}' (normalizzato: '{normalize_sender(rule.match.supplier)}')")
+        logger.info(f"   Similarity score: {best_similarity:.3f} (threshold: {similarity_threshold:.2f})")
+        logger.info(f"   Fields disponibili: {list(rule.fields.keys())}")
+        
+        # Log altri candidati se presenti
+        if len(candidate_rules) > 1:
+            logger.info(f"   Altri candidati scartati:")
+            for other_name, _, other_sim in candidate_rules[1:]:
+                logger.info(f"     - {other_name}: similarity {other_sim:.3f}")
+        
         return rule
     else:
-        logger.warning(f"❌ No layout rule match for mittente: '{supplier}' (normalizzato: '{normalized_supplier}')")
+        logger.warning(f"❌ NO LAYOUT MODEL MATCHED")
+        logger.warning(f"   Supplier estratto: '{supplier}' (normalizzato: '{normalized_supplier}')")
+        logger.warning(f"   Motivo: nessun modello ha superato la soglia di similarity ({similarity_threshold:.2f})")
         return None
 
 
 def detect_layout_model_advanced(
     pdf_text: str,
     file_path: str,
-    page_count: Optional[int] = None
+    page_count: Optional[int] = None,
+    similarity_threshold: float = LAYOUT_MODEL_SIMILARITY_THRESHOLD
 ) -> Optional[tuple[str, LayoutRule]]:
     """
-    Pre-detection avanzata del layout model usando multiple strategie
+    Pre-detection avanzata del layout model usando FUZZY MATCHING
     
-    Strategie (in ordine di priorità):
-    1. Keyword matching nel testo (prime righe)
-    2. Nome file matching
-    3. Mittente estratto dal testo (come fallback)
+    Strategie combinate (in ordine di priorità):
+    1. Keyword matching nel testo (prime righe) + fuzzy matching
+    2. Nome file matching + fuzzy matching
+    3. Mittente estratto dal testo + fuzzy matching
     
     Args:
         pdf_text: Testo estratto dal PDF
         file_path: Percorso del file PDF
         page_count: Numero di pagine del documento
+        similarity_threshold: Soglia minima di similarità (default: 0.6)
         
     Returns:
         Tupla (rule_name, LayoutRule) se trovata, None altrimenti
@@ -280,10 +358,28 @@ def detect_layout_model_advanced(
     from pathlib import Path
     
     file_name = Path(file_path).stem.lower()
-    logger.info(f"🔍 Layout pre-detection: analizzando file '{file_name}'")
+    logger.info(f"🔍 Layout pre-detection avanzata: analizzando file '{file_name}' (threshold: {similarity_threshold:.2f})")
     
-    # Strategia 1: Keyword matching nel testo (prime 500 caratteri)
+    # Strategia 1: Keyword matching nel testo (prime 500 caratteri) + fuzzy
     text_sample = (pdf_text[:500] if pdf_text else "").lower()
+    
+    # Estrai potenziali mittenti dal testo per fuzzy matching
+    extracted_mittenti = []
+    if pdf_text:
+        try:
+            mittente_patterns = [
+                r'(?:Mittente|Da:|Fornitore|Spett\.le)\s*:?\s*([A-Z][A-Za-z0-9\s&\.]+(?:S\.r\.l\.|S\.p\.A\.|S\.A\.S\.|S\.A\.|SRL|SPA)?)',
+                r'([A-Z][A-Za-z0-9\s&\.]+)\s*(?:S\.r\.l\.|S\.p\.A\.|S\.A\.S\.|S\.A\.|SRL|SPA)',
+            ]
+            for pattern in mittente_patterns:
+                match = re.search(pattern, pdf_text[:1000], re.IGNORECASE)
+                if match:
+                    extracted_mittente = match.group(1).strip()
+                    extracted_mittenti.append(extracted_mittente)
+        except Exception as e:
+            logger.debug(f"Errore estrazione mittente per pre-detection: {e}")
+    
+    candidate_rules = []
     
     for rule_name, rule in rules.items():
         match_criteria = rule.match
@@ -299,51 +395,77 @@ def detect_layout_model_advanced(
             if page_count != match_criteria.page_count:
                 continue
         
-        # Test 1: Keyword nel testo
-        if keywords and text_sample:
-            for keyword in keywords:
-                if keyword in text_sample:
-                    logger.info(f"✅ LAYOUT MODEL MATCHED: '{rule_name}' (keyword '{keyword}' trovata nel testo)")
-                    logger.info(f"   Supplier: '{supplier_original}'")
-                    return (rule_name, rule)
+        best_similarity = 0.0
+        match_reason = None
         
-        # Test 2: Nome file contiene supplier
+        # Test 1: Keyword nel testo + fuzzy matching su mittenti estratti
+        if keywords and text_sample:
+            keyword_found = any(keyword in text_sample for keyword in keywords)
+            if keyword_found:
+                # Se keyword trovata, prova fuzzy matching con mittenti estratti
+                for extracted_mittente in extracted_mittenti:
+                    extracted_normalized = normalize_sender(extracted_mittente)
+                    similarity = calculate_sender_similarity(extracted_normalized, supplier_normalized)
+                    if similarity > best_similarity:
+                        best_similarity = similarity
+                        match_reason = f"keyword '{keywords[0]}' + fuzzy match (mittente estratto: '{extracted_mittente}')"
+        
+        # Test 2: Nome file + fuzzy matching
         if supplier_normalized:
             # Prova con supplier normalizzato completo
             if supplier_normalized in file_name:
-                logger.info(f"✅ LAYOUT MODEL MATCHED: '{rule_name}' (nome file contiene supplier)")
-                logger.info(f"   Supplier: '{supplier_original}'")
-                return (rule_name, rule)
-            
-            # Prova con keyword dal supplier
-            for keyword in keywords:
-                if keyword in file_name:
-                    logger.info(f"✅ LAYOUT MODEL MATCHED: '{rule_name}' (nome file contiene keyword '{keyword}')")
-                    logger.info(f"   Supplier: '{supplier_original}'")
-                    return (rule_name, rule)
+                similarity = 0.9  # Match esatto nel nome file = alta confidence
+                if similarity > best_similarity:
+                    best_similarity = similarity
+                    match_reason = "nome file contiene supplier completo"
+            else:
+                # Prova fuzzy matching con nome file
+                # Estrai potenziali mittenti dal nome file
+                file_tokens = set(file_name.split('_'))
+                supplier_tokens = set(supplier_normalized.split())
+                if supplier_tokens & file_tokens:  # Se ci sono token comuni
+                    similarity = calculate_sender_similarity(file_name, supplier_normalized)
+                    if similarity > best_similarity:
+                        best_similarity = similarity
+                        match_reason = f"fuzzy match con nome file"
         
-        # Test 3: Estrazione mittente dal testo e match
-        if pdf_text:
-            try:
-                mittente_patterns = [
-                    r'(?:Mittente|Da:|Fornitore|Spett\.le)\s*:?\s*([A-Z][A-Za-z0-9\s&\.]+(?:S\.r\.l\.|S\.p\.A\.|S\.A\.S\.|S\.A\.|SRL|SPA)?)',
-                    r'([A-Z][A-Za-z0-9\s&\.]+)\s*(?:S\.r\.l\.|S\.p\.A\.|S\.A\.S\.|S\.A\.|SRL|SPA)',
-                ]
-                for pattern in mittente_patterns:
-                    match = re.search(pattern, pdf_text[:1000], re.IGNORECASE)
-                    if match:
-                        extracted_mittente = match.group(1).strip()
-                        extracted_normalized = normalize_sender(extracted_mittente)
-                        
-                        if extracted_normalized == supplier_normalized:
-                            logger.info(f"✅ LAYOUT MODEL MATCHED: '{rule_name}' (mittente estratto matcha)")
-                            logger.info(f"   Supplier: '{supplier_original}' (estratto: '{extracted_mittente}')")
-                            return (rule_name, rule)
-            except Exception as e:
-                logger.debug(f"Errore estrazione mittente per pre-detection: {e}")
+        # Test 3: Fuzzy matching diretto con mittenti estratti
+        for extracted_mittente in extracted_mittenti:
+            extracted_normalized = normalize_sender(extracted_mittente)
+            similarity = calculate_sender_similarity(extracted_normalized, supplier_normalized)
+            if similarity > best_similarity:
+                best_similarity = similarity
+                match_reason = f"fuzzy match diretto (mittente estratto: '{extracted_mittente}')"
+        
+        if best_similarity >= similarity_threshold:
+            logger.info(f"  📊 Modello candidato: '{rule_name}'")
+            logger.info(f"     Supplier modello: '{supplier_original}' (normalizzato: '{supplier_normalized}')")
+            logger.info(f"     Similarity score: {best_similarity:.3f} ✅")
+            logger.info(f"     Match reason: {match_reason}")
+            candidate_rules.append((rule_name, rule, best_similarity, match_reason))
     
-    logger.info(f"❌ LAYOUT MODEL SKIPPED: nessun match trovato con le strategie disponibili")
-    return None
+    if candidate_rules:
+        # Seleziona il modello con similarity più alta
+        candidate_rules.sort(key=lambda x: x[2], reverse=True)
+        rule_name, rule, best_similarity, match_reason = candidate_rules[0]
+        
+        logger.info(f"✅ LAYOUT MODEL MATCHED: '{rule_name}'")
+        logger.info(f"   Similarity score: {best_similarity:.3f} (threshold: {similarity_threshold:.2f})")
+        logger.info(f"   Match reason: {match_reason}")
+        logger.info(f"   Supplier modello: '{rule.match.supplier}'")
+        
+        # Log altri candidati se presenti
+        if len(candidate_rules) > 1:
+            logger.info(f"   Altri candidati scartati:")
+            for other_name, _, other_sim, other_reason in candidate_rules[1:]:
+                logger.info(f"     - {other_name}: similarity {other_sim:.3f} ({other_reason})")
+        
+        return (rule_name, rule)
+    else:
+        logger.info(f"❌ LAYOUT MODEL SKIPPED: nessun match trovato con similarity >= {similarity_threshold:.2f}")
+        if extracted_mittenti:
+            logger.info(f"   Mittenti estratti provati: {extracted_mittenti}")
+        return None
 
 
 def save_layout_rule(rule_name: str, supplier: str, page_count: Optional[int], fields: Dict[str, Dict[str, Any]]) -> str:
