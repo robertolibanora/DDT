@@ -36,11 +36,11 @@ class PreviewModal {
                     </div>
                     
                     <div class="preview-modal-content">
-                        <!-- PDF Viewer -->
+                        <!-- PDF Preview Image -->
                         <div class="preview-pdf-section">
                             <h3>📄 Documento Scannerizzato</h3>
                             <div class="preview-pdf-container">
-                                <iframe id="preview-pdf-iframe" src="" frameborder="0"></iframe>
+                                <img id="preview-pdf-image" src="" alt="Anteprima DDT" style="max-width: 100%; height: auto; display: block; margin: 0 auto;">
                             </div>
                         </div>
 
@@ -125,10 +125,14 @@ class PreviewModal {
         this.currentFileHash = fileHash;
         this.currentFileName = fileName;
 
-        // Imposta PDF
-        const pdfBlob = this.base64ToBlob(pdfBase64, 'application/pdf');
-        const pdfUrl = URL.createObjectURL(pdfBlob);
-        document.getElementById('preview-pdf-iframe').src = pdfUrl;
+        // Imposta immagine PNG di anteprima usando l'endpoint dedicato
+        const imageUrl = `/preview/image/${fileHash}`;
+        const imgElement = document.getElementById('preview-pdf-image');
+        imgElement.src = imageUrl;
+        imgElement.onerror = () => {
+            console.error('Errore caricamento immagine anteprima');
+            imgElement.alt = 'Errore caricamento anteprima';
+        };
 
         // Imposta dati nel form
         document.getElementById('preview-file-hash').value = fileHash || '';
@@ -157,12 +161,9 @@ class PreviewModal {
         this.modal.classList.add('hidden');
         document.body.style.overflow = '';
         
-        // Pulisci iframe per liberare memoria
-        const iframe = document.getElementById('preview-pdf-iframe');
-        if (iframe.src.startsWith('blob:')) {
-            URL.revokeObjectURL(iframe.src);
-            iframe.src = '';
-        }
+        // Pulisci immagine per liberare memoria
+        const imgElement = document.getElementById('preview-pdf-image');
+        imgElement.src = '';
         
         this.currentData = null;
         this.currentFileHash = null;

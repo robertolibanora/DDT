@@ -7,7 +7,7 @@ import logging
 import json
 from pathlib import Path
 from fastapi import APIRouter, Request, HTTPException, Depends, Form
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 
 from app.dependencies import require_authentication
 from app.corrections import save_correction, get_file_hash
@@ -22,6 +22,159 @@ TEMP_PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/preview", tags=["preview"])
+
+
+def generate_preview_png(pdf_path: str, file_hash: str) -> Path:
+    """
+    Genera una PNG di anteprima da un PDF e la salva in temp/preview
+    Restituisce il path del file PNG generato
+    """
+    png_path = TEMP_PREVIEW_DIR / f"{file_hash}.png"
+    
+    # Se la PNG esiste già, restituiscila
+    if png_path.exists():
+        logger.debug(f"PNG già esistente: {png_path}")
+        return png_path
+    
+    try:
+        # Leggi il PDF
+        with open(pdf_path, 'rb') as f:
+            pdf_bytes = f.read()
+        
+        if len(pdf_bytes) == 0:
+            raise ValueError("PDF vuoto")
+        
+        # Metodo 1: Prova con PyMuPDF (fitz) - migliore per Windows
+        try:
+            import fitz  # PyMuPDF
+            
+            logger.info(f"Generazione PNG con PyMuPDF da {pdf_path}")
+            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            if len(doc) == 0:
+                raise ValueError("PDF vuoto o non valido")
+            
+            # Converti la prima pagina in immagine
+            page = doc[0]
+            # Matrice di trasformazione per DPI 200 (200/72 = 2.78)
+            zoom = 200 / 72.0
+            mat = fitz.Matrix(zoom, zoom)
+            pix = page.get_pixmap(matrix=mat)
+            
+            # Salva come PNG
+            pix.save(str(png_path))
+            doc.close()
+            logger.info(f"PNG generata con PyMuPDF: {png_path} ({png_path.stat().st_size} bytes)")
+            return png_path
+            
+        except ImportError:
+            logger.warning("PyMuPDF non disponibile, provo con pdf2image...")
+            # Metodo 2: Fallback a pdf2image
+            try:
+                from pdf2image import convert_from_bytes
+                
+                logger.info(f"Generazione PNG con pdf2image da {pdf_path}")
+                images = convert_from_bytes(pdf_bytes, first_page=1, last_page=1, dpi=200)
+                if not images:
+                    raise ValueError("Impossibile convertire il PDF in immagine")
+                
+                images[0].save(str(png_path), 'PNG')
+                logger.info(f"PNG generata con pdf2image: {png_path} ({png_path.stat().st_size} bytes)")
+                return png_path
+                
+            except ImportError:
+                error_msg = "Nessuna libreria disponibile per convertire PDF. Installa PyMuPDF (consigliato) o pdf2image+Poppler"
+                logger.error(error_msg)
+                raise ImportError(error_msg)
+            except Exception as e:
+                error_msg = f"Errore conversione PDF con pdf2image: {e}"
+                logger.error(error_msg, exc_info=True)
+                raise ValueError(error_msg) from e
+                
+        except Exception as e:
+            logger.warning(f"Errore conversione PDF con PyMuPDF: {e}, provo fallback...")
+            # Fallback a pdf2image se PyMuPDF fallisce
+            try:
+                from pdf2image import convert_from_bytes
+                
+                logger.info(f"Generazione PNG con pdf2image (fallback) da {pdf_path}")
+                images = convert_from_bytes(pdf_bytes, first_page=1, last_page=1, dpi=200)
+                if not images:
+                    raise ValueError("Impossibile convertire il PDF in immagine")
+                
+                images[0].save(str(png_path), 'PNG')
+                logger.info(f"PNG generata con pdf2image (fallback): {png_path} ({png_path.stat().st_size} bytes)")
+                return png_path
+            except Exception as e2:
+                error_msg = f"Errore conversione PDF: PyMuPDF fallito ({e}), pdf2image fallito ({e2})"
+                logger.error(error_msg, exc_info=True)
+                raise ValueError(error_msg) from e2
+                
+    except Exception as e:
+        logger.error(f"Errore generazione PNG: {e}", exc_info=True)
+        raise
+
+
+@router.get("/image/{file_hash}")
+async def get_preview_image(
+    file_hash: str,
+    request: Request,
+    auth: bool = Depends(require_authentication)
+):
+    """
+    Endpoint per servire l'immagine PNG di anteprima del DDT
+    Genera la PNG on-demand se non esiste già
+    """
+    try:
+        png_path = TEMP_PREVIEW_DIR / f"{file_hash}.png"
+        
+        # Se la PNG non esiste, generala
+        if not png_path.exists():
+            # Cerca il PDF nella cartella inbox
+            pdf_path = None
+            inbox_path = Path(INBOX_DIR)
+            
+            if inbox_path.exists():
+                for pdf_file in inbox_path.glob("*.pdf"):
+                    try:
+                        if get_file_hash(str(pdf_file)) == file_hash:
+                            pdf_path = str(pdf_file)
+                            break
+                    except:
+                        continue
+            
+            if not pdf_path:
+                # Prova anche nella cartella temp/preview
+                temp_pdf = TEMP_PREVIEW_DIR / f"{file_hash}.pdf"
+                if temp_pdf.exists():
+                    pdf_path = str(temp_pdf)
+            
+            if not pdf_path:
+                logger.warning(f"PDF non trovato per hash {file_hash}")
+                raise HTTPException(status_code=404, detail="File PDF non trovato")
+            
+            # Genera la PNG
+            logger.info(f"Generazione PNG on-demand per hash {file_hash} da {pdf_path}")
+            png_path = generate_preview_png(pdf_path, file_hash)
+        
+        # Verifica che il file esista
+        if not png_path.exists():
+            raise HTTPException(status_code=404, detail="Immagine di anteprima non trovata")
+        
+        # Restituisci la PNG con i header corretti
+        return FileResponse(
+            path=str(png_path),
+            media_type="image/png",
+            headers={
+                "Content-Disposition": "inline",
+                "Cache-Control": "no-store"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Errore servizio immagine anteprima: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Errore durante la generazione dell'anteprima: {str(e)}")
 
 
 # La pagina /preview è stata rimossa - l'anteprima è ora integrata come modal globale
