@@ -4,6 +4,7 @@ Determina se il testo è sufficientemente affidabile per rule detection e ground
 """
 import logging
 import re
+from typing import Tuple, Optional, List
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
