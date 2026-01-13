@@ -217,9 +217,13 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
         text_extraction_result = extract_text_pipeline(file_path, max_pages=5, enable_ocr=False)
         pdf_text = text_extraction_result.text if text_extraction_result else ""
         
-        # Estrai un possibile mittente dal testo per layout rule matching
-        # Prova prima con estrazione preliminare dal testo, poi con AI se disponibile
+        # IMPORTANTE: Carica layout rules ad ogni chiamata per garantire consistenza
+        from app.layout_rules.manager import load_layout_rules, match_layout_rule, normalize_sender
+        layout_rules_loaded = load_layout_rules()
+        
+        # Estrai e normalizza mittente dal testo per layout rule matching
         potential_mittente = None
+        potential_mittente_normalized = None
         
         # Metodo 1: Estrazione dal testo estratto
         if pdf_text:
@@ -234,64 +238,65 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
                     match = re.search(pattern, pdf_text[:1000], re.IGNORECASE)
                     if match:
                         potential_mittente = match.group(1).strip()
-                        # Pulisci il mittente estratto
-                        potential_mittente = re.sub(r'\s+', ' ', potential_mittente)
-                        logger.debug(f"📄 Mittente estratto dal testo: '{potential_mittente}'")
+                        # Normalizza: uppercase, rimuovi punteggiatura, collassa spazi
+                        potential_mittente_normalized = normalize_sender(potential_mittente)
+                        logger.debug(f"📄 Mittente estratto dal testo: '{potential_mittente}' (normalizzato: '{potential_mittente_normalized}')")
                         break
             except Exception as e:
                 logger.debug(f"Errore estrazione mittente preliminare: {e}")
         
         # Prova a matchare una layout rule con il mittente estratto
         layout_rule = None
-        if potential_mittente:
+        extraction_mode = None
+        
+        if potential_mittente_normalized:
             layout_rule = match_layout_rule(potential_mittente, page_count)
         
-        # Se non trovato, proviamo anche dopo l'estrazione AI (fallback)
-        # Questo verrà fatto dopo l'estrazione AI se necessario
-        
-        # Se trovata layout rule, prova estrazione con box
-        box_extracted_data = None
-        missing_fields = {'data', 'mittente', 'destinatario', 'numero_documento', 'totale_kg'}  # Default: tutti mancanti
+        # HARD FAILOVER: Se layout rule matcha, USA SOLO BOX EXTRACTION, NON chiamare LLM
         if layout_rule:
-            logger.info(f"🎯 Layout rule trovata, provo estrazione con box per supplier: {potential_mittente}")
+            logger.info(f"📐 Layout rule APPLIED - Using LAYOUT_RULE extraction mode (NO LLM)")
+            extraction_mode = "LAYOUT_RULE"
+            
             try:
                 box_raw_data = extract_with_layout_rule(file_path, layout_rule, potential_mittente, page_count)
                 if box_raw_data:
                     box_extracted_data = normalize_extracted_box_data(box_raw_data)
                     logger.info(f"✅ Dati estratti da box: {list(box_extracted_data.keys())}")
                     
-                    # Verifica se abbiamo tutti i campi necessari
-                    required_fields = {'data', 'mittente', 'destinatario', 'numero_documento', 'totale_kg'}
-                    missing_fields = required_fields - set(box_extracted_data.keys())
-                    
-                    if not missing_fields:
-                        logger.info("✅ Tutti i campi estratti da box, salto chiamata AI")
-                    else:
-                        logger.info(f"⚠️ Campi mancanti da box: {missing_fields}, uso AI per completare")
+                    # Valida i dati estratti dai box
+                    try:
+                        normalized_data = box_extracted_data
+                        # Applica suggerimenti di apprendimento automatico
+                        try:
+                            normalized_data = apply_learning_suggestions(normalized_data)
+                            logger.info("Suggerimenti di apprendimento applicati")
+                        except Exception as e:
+                            logger.warning(f"Errore applicazione suggerimenti apprendimento: {e}")
+                        
+                        # Valida usando Pydantic
+                        ddt_data = DDTData(**normalized_data)
+                        result = ddt_data.model_dump()
+                        logger.info(f"✅ Dati validati con successo (estrazione box)")
+                        logger.info(f"📊 Extraction mode used: {extraction_mode}")
+                        return result
+                    except ValidationError as e:
+                        logger.error(f"❌ Validazione fallita per dati box: {e}")
+                        logger.error(f"❌ Fallback to AI extraction due to validation failure")
+                        extraction_mode = "AI_FALLBACK"
+                        # Continua con AI extraction
+                else:
+                    logger.error(f"❌ Estrazione box fallita completamente")
+                    logger.error(f"❌ Fallback to AI extraction")
+                    extraction_mode = "AI_FALLBACK"
+                    # Continua con AI extraction
             except Exception as e:
-                logger.warning(f"⚠️ Errore estrazione con layout rule, fallback su OCR/AI: {e}")
-                box_extracted_data = None
-        
-        # Se abbiamo tutti i campi dai box, salta la chiamata AI
-        if box_extracted_data and not missing_fields:
-            # Valida i dati estratti dai box
-            try:
-                normalized_data = box_extracted_data
-                # Applica suggerimenti di apprendimento automatico
-                try:
-                    normalized_data = apply_learning_suggestions(normalized_data)
-                    logger.info("Suggerimenti di apprendimento applicati")
-                except Exception as e:
-                    logger.warning(f"Errore applicazione suggerimenti apprendimento: {e}")
-                
-                # Valida usando Pydantic
-                ddt_data = DDTData(**normalized_data)
-                result = ddt_data.model_dump()
-                logger.info(f"✅ Dati validati con successo (estrazione box): {result}")
-                return result
-            except ValidationError as e:
-                logger.warning(f"⚠️ Validazione fallita per dati box, fallback su AI: {e}")
-                box_extracted_data = None  # Forza fallback su AI
+                logger.error(f"❌ Errore estrazione con layout rule: {e}", exc_info=True)
+                logger.error(f"❌ Fallback to AI extraction")
+                extraction_mode = "AI_FALLBACK"
+                # Continua con AI extraction
+        else:
+            logger.warning(f"❌ No layout rule match for mittente: '{potential_mittente or 'N/A'}'")
+            extraction_mode = "AI_FALLBACK"
         
         # Log dettagli estrazione testo
         if text_extraction_result:
@@ -468,41 +473,12 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
         # Normalizza i dati prima della validazione
         normalized_data = _normalize_extracted_data(raw_data)
         
-        # Se non avevamo trovato una layout rule prima, proviamo ora con il mittente estratto dall'AI
-        if not layout_rule and normalized_data.get('mittente'):
-            ai_mittente = normalized_data.get('mittente', '').strip()
-            if ai_mittente and ai_mittente != "Non specificato":
-                logger.info(f"🔍 Retry layout rule matching con mittente da AI: '{ai_mittente}'")
-                layout_rule_retry = match_layout_rule(ai_mittente, page_count)
-                
-                # Se trovato ora, prova estrazione con box (ma solo se non abbiamo già dati)
-                if layout_rule_retry and not box_extracted_data:
-                    logger.info(f"🎯 Layout rule trovata con mittente AI, provo estrazione con box")
-                    try:
-                        box_raw_data_retry = extract_with_layout_rule(file_path, layout_rule_retry, ai_mittente, page_count)
-                        if box_raw_data_retry:
-                            box_extracted_data = normalize_extracted_box_data(box_raw_data_retry)
-                            logger.info(f"✅ Dati estratti da box (retry): {list(box_extracted_data.keys())}")
-                            
-                            # Verifica campi mancanti
-                            required_fields = {'data', 'mittente', 'destinatario', 'numero_documento', 'totale_kg'}
-                            missing_fields_retry = required_fields - set(box_extracted_data.keys())
-                            
-                            if not missing_fields_retry:
-                                logger.info("✅ Tutti i campi estratti da box (retry), salto chiamata AI")
-                            else:
-                                logger.info(f"⚠️ Campi mancanti da box (retry): {missing_fields_retry}")
-                    except Exception as e:
-                        logger.warning(f"⚠️ Errore estrazione con layout rule (retry): {e}")
-                        box_extracted_data = None
-        
-        # Se abbiamo dati estratti dai box, merge con i dati AI (box hanno priorità)
-        if box_extracted_data:
-            logger.info("🔄 Merge dati box con dati AI")
-            for field, value in box_extracted_data.items():
-                if value and value != "Non specificato" and value != "1900-01-01" and value != 0.0:
-                    normalized_data[field] = value
-                    logger.info(f"📦 Campo da box (priorità): {field} = {value}")
+        # HARD FAILOVER: Se extraction_mode è LAYOUT_RULE, NON dovremmo essere qui
+        # Se siamo qui, significa che extraction_mode è AI_FALLBACK
+        if extraction_mode == "LAYOUT_RULE":
+            logger.error(f"❌ CRITICAL: extraction_mode è LAYOUT_RULE ma siamo nella sezione AI extraction!")
+            logger.error(f"❌ Questo non dovrebbe mai accadere - layout rule dovrebbe aver già restituito")
+            extraction_mode = "AI_FALLBACK"  # Forza fallback per sicurezza
         
         # Applica suggerimenti di apprendimento automatico
         try:
@@ -533,11 +509,16 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
             logger.error(f"Dati grezzi estratti: {raw_data}")
             raise ValueError(error_msg)
         
+        # Assicura che extraction_mode sia impostato
+        if extraction_mode is None:
+            extraction_mode = "AI_FALLBACK"
+        
         # Valida usando Pydantic
         try:
             ddt_data = DDTData(**normalized_data)
             result = ddt_data.model_dump()
-            logger.info(f"Dati validati con successo: {result}")
+            logger.info(f"✅ Dati validati con successo")
+            logger.info(f"📊 Extraction mode used: {extraction_mode}")
             return result
         except ValidationError as e:
             # Estrai un messaggio più chiaro dagli errori di validazione Pydantic

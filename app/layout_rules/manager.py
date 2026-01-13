@@ -91,18 +91,26 @@ def load_layout_rules() -> Dict[str, LayoutRule]:
         Dizionario con nome_regola -> LayoutRule
     """
     if not LAYOUT_RULES_FILE.exists():
-        logger.info(f"📁 File layout rules non trovato, creo file vuoto: {LAYOUT_RULES_FILE}")
+        logger.warning(f"❌ File layout rules non trovato: {LAYOUT_RULES_FILE}")
+        logger.info(f"📁 Creo file vuoto: {LAYOUT_RULES_FILE}")
         # Crea directory se non esiste
         LAYOUT_RULES_FILE.parent.mkdir(parents=True, exist_ok=True)
         save_layout_rules({})
+        logger.info(f"✅ Loaded 0 layout rules: []")
         return {}
     
     try:
         with open(LAYOUT_RULES_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+            file_content = f.read()
+            if not file_content.strip():
+                logger.error(f"❌ File layout rules è vuoto: {LAYOUT_RULES_FILE}")
+                logger.info(f"✅ Loaded 0 layout rules: []")
+                return {}
+            data = json.loads(file_content)
         
         if not data:
-            logger.info("📦 Nessuna regola di layout salvata")
+            logger.warning(f"❌ File layout rules contiene dati vuoti: {LAYOUT_RULES_FILE}")
+            logger.info(f"✅ Loaded 0 layout rules: []")
             return {}
         
         rules = {}
@@ -126,13 +134,22 @@ def load_layout_rules() -> Dict[str, LayoutRule]:
         for sender_norm, count in sender_counts.items():
             logger.info(f"📦 Caricate {count} layout model(s) per sender: {sender_norm}")
         
-        logger.info(f"✅ Totale: {len(rules)} regole di layout caricate")
+        # Log esplicito con lista delle chiavi
+        rule_keys = list(rules.keys())
+        if rule_keys:
+            logger.info(f"✅ Loaded {len(rules)} layout rules: {rule_keys}")
+        else:
+            logger.info(f"✅ Loaded {len(rules)} layout rules: []")
+        
         return rules
     except json.JSONDecodeError as e:
-        logger.error(f"❌ Errore parsing JSON layout rules: {e}")
+        logger.error(f"❌ Errore parsing JSON layout rules da {LAYOUT_RULES_FILE}: {e}")
+        logger.error(f"❌ File potrebbe essere corrotto o malformato")
+        logger.info(f"✅ Loaded 0 layout rules: []")
         return {}
     except Exception as e:
-        logger.error(f"❌ Errore caricamento layout rules: {e}", exc_info=True)
+        logger.error(f"❌ Errore caricamento layout rules da {LAYOUT_RULES_FILE}: {e}", exc_info=True)
+        logger.info(f"✅ Loaded 0 layout rules: []")
         return {}
 
 
@@ -219,11 +236,15 @@ def match_layout_rule(supplier: str, page_count: Optional[int] = None) -> Option
     if matched_rules:
         # Prendi la prima regola matchata (potremmo migliorare con priorità)
         rule_name, rule = matched_rules[0]
-        logger.info(f"🎯 Layout rule found for sender: '{supplier}' → Regola: {rule_name}")
-        logger.info(f"📦 Applying layout-based extraction")
+        logger.info(f"📐 Layout rule APPLIED for mittente: '{supplier}' (normalizzato: '{normalized_supplier}')")
+        logger.info(f"   Rule name: {rule_name}")
+        logger.debug(f"   Rule details - Fields: {list(rule.fields.keys())}")
+        logger.debug(f"   Rule details - Box coordinates:")
+        for field_name, field_box in rule.fields.items():
+            logger.debug(f"     {field_name}: page={field_box.page}, x_pct={field_box.box.x_pct:.4f}, y_pct={field_box.box.y_pct:.4f}, w_pct={field_box.box.w_pct:.4f}, h_pct={field_box.box.h_pct:.4f}")
         return rule
     else:
-        logger.info(f"⚠️ No layout rule found for sender: '{supplier}' (normalizzato: '{normalized_supplier}'), using standard extraction")
+        logger.warning(f"❌ No layout rule match for mittente: '{supplier}' (normalizzato: '{normalized_supplier}')")
         return None
 
 

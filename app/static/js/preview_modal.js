@@ -331,19 +331,22 @@ class PreviewModal {
                     }
                 }
                 
-                // Mostra conferma
+                // Nascondi tutti gli altri stati prima di mostrare la conferma
+                const statusEl = document.getElementById('model-detection-status');
+                const detectedEl = document.getElementById('model-detected');
+                const selectionEl = document.getElementById('model-selection');
+                
+                if (statusEl) statusEl.classList.add('hidden');
+                if (detectedEl) detectedEl.classList.add('hidden');
+                if (selectionEl) selectionEl.classList.add('hidden');
+                
+                // Mostra conferma applicazione
                 if (appliedEl) {
                     appliedEl.classList.remove('hidden');
                     const appliedNameEl = document.getElementById('applied-model-name');
                     if (appliedNameEl) {
                         appliedNameEl.textContent = data.model_applied?.name || modelId;
                     }
-                }
-                
-                // Nascondi selezione
-                const selectionEl = document.getElementById('model-selection');
-                if (selectionEl) {
-                    selectionEl.classList.add('hidden');
                 }
             }
         } catch (error) {
@@ -362,6 +365,20 @@ class PreviewModal {
         this.currentFileHash = fileHash;
         this.currentFileName = fileName;
         this.currentModel = null;
+
+        // Reset tutti gli stati di riconoscimento modello
+        const statusEl = document.getElementById('model-detection-status');
+        const detectedEl = document.getElementById('model-detected');
+        const selectionEl = document.getElementById('model-selection');
+        const appliedEl = document.getElementById('model-applied');
+        
+        if (statusEl) {
+            statusEl.classList.add('hidden');
+            statusEl.innerHTML = '<span class="model-detection-spinner">⏳ Rilevamento modello in corso...</span>';
+        }
+        if (detectedEl) detectedEl.classList.add('hidden');
+        if (selectionEl) selectionEl.classList.add('hidden');
+        if (appliedEl) appliedEl.classList.add('hidden');
 
         // Imposta immagine PNG di anteprima usando l'endpoint dedicato
         const imageUrl = `/preview/image/${fileHash}`;
@@ -433,6 +450,20 @@ class PreviewModal {
         if (imgElement) {
             imgElement.src = '';
         }
+        
+        // Reset tutti gli stati di riconoscimento modello
+        const statusEl = document.getElementById('model-detection-status');
+        const detectedEl = document.getElementById('model-detected');
+        const selectionEl = document.getElementById('model-selection');
+        const appliedEl = document.getElementById('model-applied');
+        
+        if (statusEl) {
+            statusEl.classList.add('hidden');
+            statusEl.innerHTML = '<span class="model-detection-spinner">⏳ Rilevamento modello in corso...</span>';
+        }
+        if (detectedEl) detectedEl.classList.add('hidden');
+        if (selectionEl) selectionEl.classList.add('hidden');
+        if (appliedEl) appliedEl.classList.add('hidden');
         
         // Reset stato modello
         this.currentModel = null;
