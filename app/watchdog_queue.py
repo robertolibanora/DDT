@@ -55,7 +55,7 @@ def _save_queue():
         logger.warning(f"Errore salvataggio coda: {e}")
 
 
-def add_to_queue(file_path: str, extracted_data: Dict[str, Any], pdf_base64: str, file_hash: str) -> str:
+def add_to_queue(file_path: str, extracted_data: Dict[str, Any], pdf_base64: str, file_hash: str, extraction_mode: Optional[str] = None) -> str:
     """
     Aggiunge un PDF alla coda per l'anteprima
     
@@ -64,6 +64,7 @@ def add_to_queue(file_path: str, extracted_data: Dict[str, Any], pdf_base64: str
         extracted_data: Dati estratti dall'AI
         pdf_base64: PDF convertito in base64
         file_hash: Hash del file
+        extraction_mode: Modalità di estrazione (LAYOUT_MODEL, HYBRID_LAYOUT_AI, AI_FALLBACK)
         
     Returns:
         ID della voce in coda
@@ -73,6 +74,9 @@ def add_to_queue(file_path: str, extracted_data: Dict[str, Any], pdf_base64: str
     with _queue_lock:
         queue_id = f"{file_hash}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
+        # Calcola suggest_create_layout: true solo se extraction_mode == AI_FALLBACK
+        suggest_create_layout = (extraction_mode == "AI_FALLBACK")
+        
         queue_item = {
             "id": queue_id,
             "file_path": file_path,
@@ -81,13 +85,15 @@ def add_to_queue(file_path: str, extracted_data: Dict[str, Any], pdf_base64: str
             "extracted_data": extracted_data,
             "pdf_base64": pdf_base64,
             "timestamp": datetime.now().isoformat(),
-            "processed": False
+            "processed": False,
+            "extraction_mode": extraction_mode,  # Aggiunto extraction_mode
+            "suggest_create_layout": suggest_create_layout  # Flag di suggerimento
         }
         
         _watchdog_queue.append(queue_item)
         _save_queue()
         
-        logger.debug(f"PDF aggiunto alla coda watchdog: {queue_id}")
+        logger.debug(f"PDF aggiunto alla coda watchdog: {queue_id} (extraction_mode={extraction_mode}, suggest_create_layout={suggest_create_layout})")
         return queue_id
 
 
@@ -101,10 +107,11 @@ def get_pending_items() -> List[Dict[str, Any]]:
     
     Returns:
         Lista di elementi in coda con stato READY_FOR_REVIEW o STUCK
+        Ogni elemento include extraction_mode e suggest_create_layout
     """
     with _queue_lock:
         _load_queue()
-        from app.processed_documents import get_document_status, DocumentStatus
+        from app.processed_documents import get_document_status, DocumentStatus, get_document_metadata
         
         pending_items = []
         for item in _watchdog_queue:
@@ -136,6 +143,21 @@ def get_pending_items() -> List[Dict[str, Any]]:
                     DocumentStatus.READY.value  # Backward compatibility
                 ):
                     continue
+                
+                # Se extraction_mode non è già presente nell'item, prova a recuperarlo dai metadata
+                if "extraction_mode" not in item or item.get("extraction_mode") is None:
+                    metadata = get_document_metadata(file_hash)
+                    if metadata and metadata.get("extraction_mode"):
+                        item["extraction_mode"] = metadata["extraction_mode"]
+                        # Ricalcola suggest_create_layout
+                        item["suggest_create_layout"] = (item["extraction_mode"] == "AI_FALLBACK")
+                        _save_queue()
+                
+                # Assicura che suggest_create_layout sia sempre presente
+                if "suggest_create_layout" not in item:
+                    extraction_mode = item.get("extraction_mode", "AI_FALLBACK")
+                    item["suggest_create_layout"] = (extraction_mode == "AI_FALLBACK")
+                    _save_queue()
             
             pending_items.append(item)
         

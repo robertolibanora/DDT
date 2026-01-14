@@ -90,6 +90,20 @@ class PreviewModal {
                                     ✏️ Insegna Layout di questo Documento
                                 </a>
                             </div>
+                            
+                            <!-- Banner suggerimento creazione layout model -->
+                            <div id="suggest-layout-banner" class="suggest-layout-banner hidden">
+                                <div class="suggest-layout-content">
+                                    <div class="suggest-layout-icon">💡</div>
+                                    <div class="suggest-layout-text">
+                                        <div class="suggest-layout-title">Questo documento è stato elaborato senza un layout model</div>
+                                        <div class="suggest-layout-subtitle">Puoi crearne uno per automatizzare i prossimi documenti simili</div>
+                                    </div>
+                                    <button id="create-layout-btn" class="btn-create-layout">
+                                        📐 Crea Layout Model
+                                    </button>
+                                </div>
+                            </div>
                         </div>
 
                         <!-- Form Dati -->
@@ -372,7 +386,7 @@ class PreviewModal {
         }
     }
 
-    show(extractedData, pdfBase64, fileHash, fileName) {
+    show(extractedData, pdfBase64, fileHash, fileName, extractionMode = null, suggestCreateLayout = false) {
         this.currentData = extractedData;
         this.currentFileHash = fileHash;
         this.currentFileName = fileName;
@@ -519,6 +533,25 @@ class PreviewModal {
             if (selectionEl) selectionEl.classList.remove('hidden');
         }
 
+        // Mostra/nascondi banner suggerimento layout model
+        const suggestBanner = document.getElementById('suggest-layout-banner');
+        if (suggestBanner) {
+            if (suggestCreateLayout) {
+                suggestBanner.classList.remove('hidden');
+                // Setup CTA button
+                const createLayoutBtn = document.getElementById('create-layout-btn');
+                if (createLayoutBtn) {
+                    createLayoutBtn.onclick = () => {
+                        const supplier = extractedData?.mittente || '';
+                        const url = `/layout-trainer?hash=${fileHash}${supplier ? '&supplier=' + encodeURIComponent(supplier) : ''}`;
+                        window.location.href = url;
+                    };
+                }
+            } else {
+                suggestBanner.classList.add('hidden');
+            }
+        }
+
         // Mostra modal
         this.modal.classList.remove('hidden');
         document.body.style.overflow = 'hidden'; // Previeni scroll della pagina
@@ -547,6 +580,12 @@ class PreviewModal {
         if (detectedEl) detectedEl.classList.add('hidden');
         if (selectionEl) selectionEl.classList.add('hidden');
         if (appliedEl) appliedEl.classList.add('hidden');
+        
+        // Nascondi banner suggerimento layout
+        const suggestBanner = document.getElementById('suggest-layout-banner');
+        if (suggestBanner) {
+            suggestBanner.classList.add('hidden');
+        }
         
         // Reset stato modello
         this.currentModel = null;

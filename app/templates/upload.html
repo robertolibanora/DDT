@@ -219,7 +219,9 @@
                                 data.extracted_data,
                                 data.pdf_base64,
                                 data.file_hash,
-                                data.file_name
+                                data.file_name,
+                                data.extraction_mode || null,
+                                data.suggest_create_layout || false
                             );
                             console.log('Modal.show chiamato con successo');
                             

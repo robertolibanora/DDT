@@ -475,13 +475,15 @@
                                 type: 'info',
                                 message: `Nuovo documento rilevato: ${newItem.file_name || 'DDT'}`,
                                 action: 'Apri anteprima',
-                                actionCallback: () => {
+                                    actionCallback: () => {
                                     if (window.previewModal) {
                                         window.previewModal.show(
                                             newItem.extracted_data,
                                             newItem.pdf_base64,
                                             newItem.file_hash,
-                                            newItem.file_name
+                                            newItem.file_name,
+                                            newItem.extraction_mode || null,
+                                            newItem.suggest_create_layout || false
                                         );
                                     }
                                 },
@@ -568,7 +570,9 @@
                     item.extracted_data,
                     item.pdf_base64,
                     item.file_hash,
-                    item.file_name
+                    item.file_name,
+                    item.extraction_mode || null,
+                    item.suggest_create_layout || false
                 );
                 
             } catch (error) {

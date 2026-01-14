@@ -199,8 +199,8 @@ class DDTHandler(FileSystemEventHandler):
             except Exception as e:
                 logger.warning(f"⚠️ Errore generazione PNG anteprima: {e}")
             
-            # Aggiungi alla coda per l'anteprima
-            queue_id = add_to_queue(file_path, data, pdf_base64, doc_hash)
+            # Aggiungi alla coda per l'anteprima (con extraction_mode)
+            queue_id = add_to_queue(file_path, data, pdf_base64, doc_hash, extraction_mode)
             logger.info(f"📋 DDT aggiunto alla coda per anteprima: queue_id={queue_id} hash={doc_hash[:16]}... numero={data.get('numero_documento', 'N/A')}")
             
             # Marca come READY_FOR_REVIEW quando tutto è pronto (dati estratti + PNG + coda)
@@ -586,9 +586,9 @@ async def upload_ddt(request: Request, file: UploadFile = File(...), auth: bool 
             except Exception as e:
                 logger.warning(f"⚠️ Errore generazione PNG anteprima: {e}")
             
-            # Aggiungi alla coda watchdog (stesso flusso)
+            # Aggiungi alla coda watchdog (stesso flusso, con extraction_mode)
             from app.watchdog_queue import add_to_queue
-            queue_id = add_to_queue(str(inbox_saved_path), data, pdf_base64, file_hash)
+            queue_id = add_to_queue(str(inbox_saved_path), data, pdf_base64, file_hash, extraction_mode)
             logger.info(f"📋 Upload aggiunto alla coda: queue_id={queue_id} hash={file_hash[:16]}... numero={data.get('numero_documento', 'N/A')}")
             
             # Marca come READY_FOR_REVIEW quando tutto è pronto (stesso flusso watchdog)
@@ -603,7 +603,9 @@ async def upload_ddt(request: Request, file: UploadFile = File(...), auth: bool 
                 "file_path": str(inbox_saved_path),
                 "pdf_base64": pdf_base64,
                 "pdf_mime": "application/pdf",
-                "queue_id": queue_id
+                "queue_id": queue_id,
+                "extraction_mode": extraction_mode,  # Aggiunto extraction_mode
+                "suggest_create_layout": (extraction_mode == "AI_FALLBACK")  # Flag di suggerimento
             })
         except HTTPException:
             # Rilancia HTTPException così com'è

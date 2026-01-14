@@ -309,6 +309,10 @@ def transition_document_state(
             if "data_inserimento" in metadata:
                 doc["data_inserimento"] = metadata["data_inserimento"]
             
+            # Salva extraction_mode nei metadata del documento (persistente)
+            if "extraction_mode" in metadata:
+                doc["extraction_mode"] = metadata["extraction_mode"]
+            
             if to_state == DocumentStatus.ERROR_FINAL:
                 doc["error_message"] = metadata.get("error_message", reason)
             
@@ -626,6 +630,36 @@ def get_document_status(doc_hash: str) -> Optional[str]:
         data = _load_documents()
         doc = data.get("documents", {}).get(doc_hash)
         return doc.get("status") if doc else None
+
+
+def get_document_metadata(doc_hash: str) -> Optional[Dict[str, Any]]:
+    """
+    Ottiene i metadati di un documento (extraction_mode, queue_id, ecc.)
+    
+    Args:
+        doc_hash: Hash SHA256 del documento
+        
+    Returns:
+        Dizionario con i metadati del documento o None se non trovato
+    """
+    with _documents_lock:
+        data = _load_documents()
+        doc = data.get("documents", {}).get(doc_hash)
+        if not doc:
+            return None
+        
+        # Estrai solo i metadati rilevanti (non lo stato che ha una funzione dedicata)
+        metadata = {}
+        if "extraction_mode" in doc:
+            metadata["extraction_mode"] = doc["extraction_mode"]
+        if "queue_id" in doc:
+            metadata["queue_id"] = doc["queue_id"]
+        if "file_path" in doc:
+            metadata["file_path"] = doc["file_path"]
+        if "file_name" in doc:
+            metadata["file_name"] = doc["file_name"]
+        
+        return metadata if metadata else None
 
 
 def should_process_document(doc_hash: str) -> tuple[bool, str]:
