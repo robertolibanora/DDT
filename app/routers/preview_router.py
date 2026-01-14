@@ -159,11 +159,12 @@ async def get_preview_image(
                     pdf_path = str(temp_pdf)
             
             if not pdf_path:
-                logger.warning(f"PDF non trovato per hash {file_hash}")
+                # Cambiato da WARNING a DEBUG: 404 è normale se file non esiste
+                logger.debug(f"PDF non trovato per hash {file_hash[:16]}... (404 normale)")
                 raise HTTPException(status_code=404, detail="File PDF non trovato")
             
             # Genera la PNG
-            logger.info(f"Generazione PNG on-demand per hash {file_hash} da {pdf_path}")
+            logger.debug(f"Generazione PNG on-demand per hash {file_hash[:16]}... da {Path(pdf_path).name}")
             png_path = generate_preview_png(pdf_path, file_hash)
         
         # Verifica che il file esista
@@ -210,7 +211,7 @@ async def get_preview_image(
         
         # Se la PNG non esiste, prova a generarla dal PDF
         if not png_path.exists():
-            logger.info(f"PNG anteprima non trovata per hash {file_hash}, provo a generarla...")
+            logger.debug(f"PNG anteprima non trovata per hash {file_hash[:16]}..., provo a generarla...")
             
             # Cerca il PDF nella cartella inbox
             from app.paths import get_inbox_dir
@@ -232,10 +233,11 @@ async def get_preview_image(
                 if generated_path:
                     png_path = Path(generated_path)
                 else:
-                    logger.warning(f"Impossibile generare PNG per {file_hash}")
+                    logger.debug(f"Impossibile generare PNG per {file_hash[:16]}... (404 normale)")
                     raise HTTPException(status_code=404, detail="Anteprima non disponibile")
             else:
-                logger.warning(f"PDF non trovato per hash {file_hash}")
+                # Cambiato da WARNING a DEBUG: 404 è normale se file non esiste
+                logger.debug(f"PDF non trovato per hash {file_hash[:16]}... (404 normale)")
                 raise HTTPException(status_code=404, detail="File PDF non trovato")
         
         if not png_path.exists():
@@ -403,10 +405,10 @@ async def save_preview(
             for item in queue_items:
                 if item.get("file_hash") == file_hash and not item.get("processed", False):
                     mark_as_processed(item.get("id"))
-                    logger.info(f"Elemento coda watchdog marcato come processato: {item.get('id')}")
+                    logger.debug(f"Elemento coda watchdog marcato come processato: {item.get('id')}")
                     break
         except Exception as e:
-            logger.warning(f"Errore marcatura elemento coda watchdog: {e}")
+            logger.debug(f"Errore marcatura elemento coda watchdog: {e}")
         
         # Rimuovi il file temporaneo dopo il salvataggio (se è nella cartella preview)
         preview_file = TEMP_PREVIEW_DIR / f"{file_hash}.pdf"

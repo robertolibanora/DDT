@@ -4,6 +4,7 @@ Gestisce il salvataggio, caricamento e matching delle regole
 """
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from app.layout_rules.models import LayoutRule, LayoutRulesFile, BoxCoordinates, FieldBox, LayoutRuleMatch
@@ -13,6 +14,9 @@ logger = logging.getLogger(__name__)
 # Percorso del file delle regole
 LAYOUT_RULES_FILE = Path(__file__).parent / "layout_rules.json"
 
+# Cache per layout rules (evita ricaricamento continuo)
+_layout_rules_cache: Optional[Dict[str, LayoutRule]] = None
+_layout_rules_cache_timestamp: Optional[float] = None
 
 # Soglia di similarità configurabile per fuzzy matching
 LAYOUT_MODEL_SIMILARITY_THRESHOLD = 0.6
@@ -139,13 +143,29 @@ def normalize_sender(name: str) -> str:
 normalize_supplier_name = normalize_sender
 
 
-def load_layout_rules() -> Dict[str, LayoutRule]:
+def load_layout_rules(force_reload: bool = False) -> Dict[str, LayoutRule]:
     """
     Carica tutte le regole di layout dal file JSON
+    Usa cache per evitare ricaricamento continuo (refresh automatico se file modificato)
     
+    Args:
+        force_reload: Se True, forza il ricaricamento ignorando la cache
+        
     Returns:
         Dizionario con nome_regola -> LayoutRule
     """
+    global _layout_rules_cache, _layout_rules_cache_timestamp
+    
+    # Usa cache se disponibile e file non modificato
+    if not force_reload and _layout_rules_cache is not None and LAYOUT_RULES_FILE.exists():
+        try:
+            file_mtime = LAYOUT_RULES_FILE.stat().st_mtime
+            if _layout_rules_cache_timestamp == file_mtime:
+                return _layout_rules_cache
+        except Exception:
+            # Se errore controllo timestamp, ricarica
+            pass
+    
     if not LAYOUT_RULES_FILE.exists():
         logger.warning(f"❌ File layout rules non trovato: {LAYOUT_RULES_FILE}")
         logger.info(f"📁 Creo file vuoto: {LAYOUT_RULES_FILE}")
@@ -197,6 +217,13 @@ def load_layout_rules() -> Dict[str, LayoutRule]:
         else:
             logger.info(f"✅ Loaded {len(rules)} layout rules: []")
         
+        # Aggiorna cache
+        _layout_rules_cache = rules
+        try:
+            _layout_rules_cache_timestamp = LAYOUT_RULES_FILE.stat().st_mtime if LAYOUT_RULES_FILE.exists() else None
+        except Exception:
+            _layout_rules_cache_timestamp = None
+        
         return rules
     except json.JSONDecodeError as e:
         logger.error(f"❌ Errore parsing JSON layout rules da {LAYOUT_RULES_FILE}: {e}")
@@ -216,6 +243,8 @@ def save_layout_rules(rules: Dict[str, LayoutRule]):
     Args:
         rules: Dizionario con nome_regola -> LayoutRule
     """
+    global _layout_rules_cache, _layout_rules_cache_timestamp
+    
     try:
         # Assicura che la directory esista
         LAYOUT_RULES_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -241,6 +270,10 @@ def save_layout_rules(rules: Dict[str, LayoutRule]):
             logger.info(f"💾 Layout model saved for sender: {sender_norm} ({count} model(s))")
         
         logger.info(f"✅ Salvate {len(rules)} regole di layout in {LAYOUT_RULES_FILE}")
+        
+        # Invalida cache per forzare ricaricamento al prossimo accesso
+        _layout_rules_cache = None
+        _layout_rules_cache_timestamp = None
     except Exception as e:
         logger.error(f"❌ Errore salvataggio layout rules: {e}", exc_info=True)
         raise
@@ -274,7 +307,7 @@ def match_layout_rule(
     
     normalized_supplier = normalize_sender(supplier)
     
-    logger.info(f"🔍 Fuzzy matching layout rule per sender: '{supplier}' (normalizzato: '{normalized_supplier}'), pagine: {page_count}, threshold: {similarity_threshold:.2f}")
+    logger.debug(f"🔍 Fuzzy matching layout rule per sender: '{supplier}' (normalizzato: '{normalized_supplier}'), pagine: {page_count}, threshold: {similarity_threshold:.2f}")
     
     candidate_rules = []
     
@@ -294,11 +327,12 @@ def match_layout_rule(
         # Calcola similarity usando fuzzy matching
         similarity = calculate_sender_similarity(normalized_supplier, normalized_rule_supplier)
         
-        logger.info(f"  📊 Modello candidato: '{rule_name}'")
-        logger.info(f"     Supplier modello: '{rule_supplier_original}' (normalizzato: '{normalized_rule_supplier}')")
-        logger.info(f"     Similarity score: {similarity:.3f} {'✅' if similarity >= similarity_threshold else '❌'}")
+        # Log dettagli solo in DEBUG per evitare rumore
+        logger.debug(f"  📊 Modello candidato: '{rule_name}'")
+        logger.debug(f"     Supplier modello: '{rule_supplier_original}' (normalizzato: '{normalized_rule_supplier}')")
+        logger.debug(f"     Similarity score: {similarity:.3f} {'✅' if similarity >= similarity_threshold else '❌'}")
         if page_count_mismatch:
-            logger.info(f"     ⚠️ Page count mismatch: regola={match_criteria.page_count}, doc={page_count}")
+            logger.debug(f"     ⚠️ Page count mismatch: regola={match_criteria.page_count}, doc={page_count}")
         
         # FIX #3: Se page_count mismatch ma similarity alta (>= 0.8) → procedi con warning
         if similarity >= similarity_threshold:
@@ -333,9 +367,9 @@ def match_layout_rule(
         
         return rule
     else:
-        logger.warning(f"❌ NO LAYOUT MODEL MATCHED")
-        logger.warning(f"   Supplier estratto: '{supplier}' (normalizzato: '{normalized_supplier}')")
-        logger.warning(f"   Motivo: nessun modello ha superato la soglia di similarity ({similarity_threshold:.2f})")
+        # Cambiato da WARNING a INFO: non è un errore, è normale per fornitori non noti
+        logger.info(f"ℹ️ NO LAYOUT MODEL MATCHED per sender: '{supplier}' (normalizzato: '{normalized_supplier}')")
+        logger.debug(f"   Motivo: nessun modello ha superato la soglia di similarity ({similarity_threshold:.2f})")
         return None
 
 
@@ -373,7 +407,7 @@ def detect_layout_model_advanced(
     from pathlib import Path
     
     file_name = Path(file_path).stem.lower()
-    logger.info(f"🔍 Layout pre-detection avanzata: analizzando file '{file_name}' (threshold: {similarity_threshold:.2f})")
+    logger.debug(f"🔍 Layout pre-detection avanzata: analizzando file '{file_name}' (threshold: {similarity_threshold:.2f})")
     
     # Strategia 1: Keyword matching nel testo (prime 500 caratteri) + fuzzy
     text_sample = (pdf_text[:500] if pdf_text else "").lower()
@@ -467,10 +501,10 @@ def detect_layout_model_advanced(
                     f"  ⚠️ Page count mismatch ({match_criteria.page_count} vs {page_count}) "
                     f"ma similarity alta ({best_similarity:.3f}) → procedo con warning"
                 )
-            logger.info(f"  📊 Modello candidato: '{rule_name}'")
-            logger.info(f"     Supplier modello: '{supplier_original}' (normalizzato: '{supplier_normalized}')")
-            logger.info(f"     Similarity score: {best_similarity:.3f} ✅")
-            logger.info(f"     Match reason: {match_reason}")
+            logger.debug(f"  📊 Modello candidato: '{rule_name}'")
+            logger.debug(f"     Supplier modello: '{supplier_original}' (normalizzato: '{supplier_normalized}')")
+            logger.debug(f"     Similarity score: {best_similarity:.3f} ✅")
+            logger.debug(f"     Match reason: {match_reason}")
             candidate_rules.append((rule_name, rule, best_similarity, match_reason))
     
     if candidate_rules:
@@ -504,9 +538,10 @@ def detect_layout_model_advanced(
         
         return (rule_name, rule)
     else:
-        logger.info(f"❌ LAYOUT MODEL SKIPPED: nessun match trovato con similarity >= {similarity_threshold:.2f}")
+        # Cambiato da INFO a DEBUG: non è necessario loggare ogni volta che non c'è match
+        logger.debug(f"ℹ️ LAYOUT MODEL SKIPPED: nessun match trovato con similarity >= {similarity_threshold:.2f}")
         if extracted_mittenti:
-            logger.info(f"   Mittenti estratti provati: {extracted_mittenti}")
+            logger.debug(f"   Mittenti estratti provati: {extracted_mittenti}")
         return None
 
 

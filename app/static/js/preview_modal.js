@@ -76,6 +76,10 @@ class PreviewModal {
                             </div>
                             
                             <div class="preview-pdf-container" id="preview-pdf-container">
+                                <div class="preview-placeholder">
+                                    <div style="font-size: 3em; margin-bottom: 10px;">📄</div>
+                                    <div>Anteprima non disponibile</div>
+                                </div>
                                 <div class="preview-image-wrapper">
                                     <img id="preview-pdf-image" src="" alt="Anteprima DDT" style="max-width: 100%; height: auto; display: block; margin: 0 auto;">
                                 </div>
@@ -118,12 +122,12 @@ class PreviewModal {
                                     <input type="text" id="preview-destinatario" name="destinatario" required>
                                 </div>
 
-                                <div class="form-group">
+                                <div class="form-group form-group-highlight">
                                     <label for="preview-numero-documento">🔢 Numero Documento</label>
                                     <input type="text" id="preview-numero-documento" name="numero_documento" required>
                                 </div>
 
-                                <div class="form-group">
+                                <div class="form-group form-group-highlight">
                                     <label for="preview-totale-kg">⚖️ Totale Kg</label>
                                     <input type="number" id="preview-totale-kg" name="totale_kg" step="0.001" min="0" required>
                                 </div>
@@ -391,12 +395,46 @@ class PreviewModal {
         // Imposta immagine PNG di anteprima usando l'endpoint dedicato
         const imageUrl = `/preview/image/${fileHash}`;
         const imgElement = document.getElementById('preview-pdf-image');
-        if (imgElement) {
+        const imageWrapper = document.querySelector('.preview-image-wrapper');
+        const pdfContainer = document.getElementById('preview-pdf-container');
+        
+        if (imgElement && pdfContainer) {
+            // Reset zoom quando cambia immagine
+            if (imageWrapper) {
+                imageWrapper.classList.remove('zoomed');
+            }
+            
+            // Reset placeholder state
+            pdfContainer.classList.remove('no-image');
+            
             imgElement.src = imageUrl;
+            imgElement.onload = () => {
+                // Immagine caricata con successo
+                pdfContainer.classList.remove('no-image');
+                if (imageWrapper) {
+                    imageWrapper.style.display = 'block';
+                }
+            };
             imgElement.onerror = () => {
                 console.error('Errore caricamento immagine anteprima');
                 imgElement.alt = 'Errore caricamento anteprima';
+                imgElement.src = '';
+                // Mostra placeholder
+                pdfContainer.classList.add('no-image');
+                if (imageWrapper) {
+                    imageWrapper.style.display = 'none';
+                }
             };
+            
+            // Aggiungi click per zoom toggle
+            if (imageWrapper) {
+                // Rimuovi listener precedenti per evitare duplicati
+                const newWrapper = imageWrapper.cloneNode(true);
+                imageWrapper.parentNode.replaceChild(newWrapper, imageWrapper);
+                newWrapper.addEventListener('click', () => {
+                    newWrapper.classList.toggle('zoomed');
+                });
+            }
         }
 
         // Imposta dati nel form

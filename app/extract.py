@@ -7,6 +7,7 @@ import base64
 import logging
 import sys
 import os
+from pathlib import Path
 from typing import Dict, Any, Optional
 from openai import OpenAI, OpenAIError
 from openai.types.chat import ChatCompletion
@@ -224,7 +225,7 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
         text_extraction_result = extract_text_pipeline(file_path, max_pages=5, enable_ocr=False)
         pdf_text = text_extraction_result.text if text_extraction_result else ""
         
-        # IMPORTANTE: Carica layout rules ad ogni chiamata per garantire consistenza
+        # Carica layout rules (usa cache automatica per performance)
         from app.layout_rules.manager import load_layout_rules, match_layout_rule, normalize_sender, detect_layout_model_advanced
         layout_rules_loaded = load_layout_rules()
         
@@ -235,7 +236,7 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
         extraction_mode = None
         box_extracted_data = None  # Inizializza sempre per evitare errori
         
-        logger.info(f"🔍 Fase pre-detection layout model...")
+        logger.debug(f"🔍 Fase pre-detection layout model...")
         detection_result = detect_layout_model_advanced(pdf_text, file_path, page_count)
         
         if detection_result:
@@ -672,7 +673,6 @@ def generate_preview_png(file_path: str, file_hash: str, output_dir: Optional[st
     Returns:
         Percorso del file PNG salvato o None se fallito
     """
-    from pathlib import Path
     from app.paths import get_preview_dir, safe_open, ensure_dir
     
     try:

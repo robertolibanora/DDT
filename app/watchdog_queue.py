@@ -35,7 +35,7 @@ def _load_queue() -> List[Dict[str, Any]]:
             from app.paths import safe_open
             with safe_open(QUEUE_FILE, 'r', encoding='utf-8') as f:
                 _watchdog_queue = json.load(f)
-            logger.info(f"Caricata coda watchdog con {len(_watchdog_queue)} elementi")
+            logger.debug(f"Caricata coda watchdog con {len(_watchdog_queue)} elementi")
         except Exception as e:
             logger.warning(f"Errore caricamento coda: {e}")
             _watchdog_queue = []
@@ -87,7 +87,7 @@ def add_to_queue(file_path: str, extracted_data: Dict[str, Any], pdf_base64: str
         _watchdog_queue.append(queue_item)
         _save_queue()
         
-        logger.info(f"PDF aggiunto alla coda watchdog: {queue_id}")
+        logger.debug(f"PDF aggiunto alla coda watchdog: {queue_id}")
         return queue_id
 
 
