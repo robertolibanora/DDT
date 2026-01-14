@@ -8,6 +8,8 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 MODEL = os.getenv("MODEL", "gpt-4o-mini")
 EXCEL_FILE = "ddt.xlsx"
 INBOX_DIR = "inbox"
+# Directory per documenti processati (struttura: processati/gg-mm-yyyy/)
+PROCESSATI_DIR = os.getenv("PROCESSATI_DIR", "processati")
 
 # Credenziali amministratore
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME")

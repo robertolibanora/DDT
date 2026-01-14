@@ -37,7 +37,8 @@ PROCESSED_DOCUMENTS_FILE = Path("app/processed_documents.json")
 #       "first_seen": "2024-01-01T12:00:00",
 #       "last_updated": "2024-01-01T12:00:00",
 #       "queue_id": "optional_queue_id",
-#       "error_message": "optional_error"
+#       "error_message": "optional_error",
+#       "data_inserimento": "14-01-2026"  # Data scelta dall'utente (gg-mm-yyyy)
 #     }
 #   }
 # }
@@ -135,7 +136,7 @@ def is_document_processing(doc_hash: str) -> bool:
 
 
 def register_document(file_path: str, doc_hash: str, status: DocumentStatus = DocumentStatus.NEW, 
-                     queue_id: Optional[str] = None) -> None:
+                     queue_id: Optional[str] = None, data_inserimento: Optional[str] = None) -> None:
     """
     Registra o aggiorna un documento nel sistema di tracking
     
@@ -144,6 +145,7 @@ def register_document(file_path: str, doc_hash: str, status: DocumentStatus = Do
         doc_hash: Hash SHA256 del documento
         status: Stato del documento
         queue_id: ID opzionale della coda watchdog
+        data_inserimento: Data di inserimento scelta dall'utente (gg-mm-yyyy)
     """
     with _documents_lock:
         data = _load_documents()
@@ -161,6 +163,9 @@ def register_document(file_path: str, doc_hash: str, status: DocumentStatus = Do
             if file_path:
                 doc["file_path"] = file_path
                 doc["file_name"] = Path(file_path).name
+            # Aggiorna data_inserimento solo se non è già FINALIZED (immutabile dopo conferma)
+            if data_inserimento and doc.get("status") != DocumentStatus.FINALIZED.value:
+                doc["data_inserimento"] = data_inserimento
         else:
             # Crea nuovo documento
             documents[doc_hash] = {
@@ -172,19 +177,22 @@ def register_document(file_path: str, doc_hash: str, status: DocumentStatus = Do
                 "last_updated": now,
                 "queue_id": queue_id
             }
+            if data_inserimento:
+                documents[doc_hash]["data_inserimento"] = data_inserimento
         
         _save_documents(data)
         
         logger.info(f"📝 Documento registrato: hash={doc_hash[:16]}... status={status.value} file={Path(file_path).name}")
 
 
-def mark_document_finalized(doc_hash: str, queue_id: Optional[str] = None) -> None:
+def mark_document_finalized(doc_hash: str, queue_id: Optional[str] = None, data_inserimento: Optional[str] = None) -> None:
     """
     Marca un documento come finalizzato
     
     Args:
         doc_hash: Hash SHA256 del documento
         queue_id: ID opzionale della coda watchdog
+        data_inserimento: Data di inserimento scelta dall'utente (gg-mm-yyyy)
     """
     with _documents_lock:
         data = _load_documents()
@@ -196,11 +204,13 @@ def mark_document_finalized(doc_hash: str, queue_id: Optional[str] = None) -> No
             doc["last_updated"] = datetime.now().isoformat()
             if queue_id:
                 doc["queue_id"] = queue_id
+            if data_inserimento:
+                doc["data_inserimento"] = data_inserimento
             _save_documents(data)
             logger.info(f"✅ Documento FINALIZED: hash={doc_hash[:16]}... file={doc.get('file_name', 'N/A')}")
         else:
             # Se non esiste, crealo come FINALIZED
-            register_document("", doc_hash, DocumentStatus.FINALIZED, queue_id)
+            register_document("", doc_hash, DocumentStatus.FINALIZED, queue_id, data_inserimento)
 
 
 def mark_document_error(doc_hash: str, error_message: str, queue_id: Optional[str] = None) -> None:
@@ -282,3 +292,53 @@ def should_process_document(doc_hash: str) -> tuple[bool, str]:
         
         # NEW o altri stati possono essere riprocessati
         return True, "reprocess_allowed"
+
+
+def get_data_inserimento(doc_hash: str) -> Optional[str]:
+    """
+    Ottiene la data di inserimento di un documento
+    
+    Args:
+        doc_hash: Hash SHA256 del documento
+        
+    Returns:
+        Data di inserimento (gg-mm-yyyy) o None se non presente
+    """
+    with _documents_lock:
+        data = _load_documents()
+        doc = data.get("documents", {}).get(doc_hash)
+        return doc.get("data_inserimento") if doc else None
+
+
+def update_data_inserimento(doc_hash: str, data_inserimento: str) -> bool:
+    """
+    Aggiorna la data di inserimento di un documento (solo se non è FINALIZED)
+    
+    Args:
+        doc_hash: Hash SHA256 del documento
+        data_inserimento: Data di inserimento (gg-mm-yyyy)
+        
+    Returns:
+        True se aggiornato, False se il documento è già FINALIZED
+    """
+    with _documents_lock:
+        data = _load_documents()
+        documents = data.setdefault("documents", {})
+        
+        if doc_hash not in documents:
+            # Crea nuovo documento con data_inserimento
+            register_document("", doc_hash, DocumentStatus.NEW, None, data_inserimento)
+            return True
+        
+        doc = documents[doc_hash]
+        
+        # Non permettere modifica se già FINALIZED
+        if doc.get("status") == DocumentStatus.FINALIZED.value:
+            logger.warning(f"⚠️ Tentativo di modificare data_inserimento per documento FINALIZED: {doc_hash[:16]}...")
+            return False
+        
+        doc["data_inserimento"] = data_inserimento
+        doc["last_updated"] = datetime.now().isoformat()
+        _save_documents(data)
+        logger.info(f"📅 Data inserimento aggiornata: hash={doc_hash[:16]}... data={data_inserimento}")
+        return True

@@ -89,6 +89,12 @@ class DDTHandler(FileSystemEventHandler):
         # Normalizza il percorso per evitare duplicati
         file_path = os.path.abspath(file_path)
         
+        # Verifica che il file sia ancora in inbox (potrebbe essere stato spostato)
+        inbox_path = os.path.abspath(INBOX_DIR)
+        if not file_path.startswith(inbox_path):
+            logger.debug(f"⏭️ File non in inbox, ignoro: {Path(file_path).name}")
+            return
+        
         # Attendi che il file sia completamente scritto (aumentato a 15 secondi per file grandi)
         if not self._wait_for_file_ready(file_path, max_wait=15):
             logger.warning(f"⏳ File non pronto dopo l'attesa: {file_path}")
@@ -100,11 +106,17 @@ class DDTHandler(FileSystemEventHandler):
                 should_process_document,
                 register_document,
                 mark_document_error,
-                DocumentStatus
+                DocumentStatus,
+                is_document_finalized
             )
             
             # Calcola hash SHA256 PRIMA di qualsiasi controllo
             doc_hash = calculate_file_hash(file_path)
+            
+            # Verifica se il documento è già FINALIZED (doppio controllo per sicurezza)
+            if is_document_finalized(doc_hash):
+                logger.info(f"⏭️ Documento già FINALIZED (hash={doc_hash[:16]}...), ignoro evento watchdog - {Path(file_path).name}")
+                return
             
             # Verifica se il documento dovrebbe essere processato
             should_process, reason = should_process_document(doc_hash)

@@ -99,6 +99,13 @@ class PreviewModal {
                                 <div class="form-group">
                                     <label for="preview-data">📅 Data DDT</label>
                                     <input type="date" id="preview-data" name="data" required>
+                                    <small class="form-help">Data del documento DDT (estratta dal PDF)</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="preview-data-inserimento">📆 Data di Inserimento</label>
+                                    <input type="date" id="preview-data-inserimento" name="data_inserimento" required>
+                                    <small class="form-help">Data di archiviazione (scelta manualmente)</small>
                                 </div>
 
                                 <div class="form-group">
@@ -319,6 +326,7 @@ class PreviewModal {
                     const originalDataEl = document.getElementById('preview-original-data');
                     
                     if (dataEl) dataEl.value = data.extracted_data.data || '';
+                    // data_inserimento non viene aggiornata quando si applica un modello
                     if (mittenteEl) mittenteEl.value = data.extracted_data.mittente || '';
                     if (destinatarioEl) destinatarioEl.value = data.extracted_data.destinatario || '';
                     if (numeroEl) numeroEl.value = data.extracted_data.numero_documento || '';
@@ -410,12 +418,23 @@ class PreviewModal {
 
         // Popola i campi
         const dataEl = document.getElementById('preview-data');
+        const dataInserimentoEl = document.getElementById('preview-data-inserimento');
         const mittenteEl = document.getElementById('preview-mittente');
         const destinatarioEl = document.getElementById('preview-destinatario');
         const numeroEl = document.getElementById('preview-numero-documento');
         const kgEl = document.getElementById('preview-totale-kg');
         
         if (dataEl) dataEl.value = extractedData.data || '';
+        
+        // Imposta data_inserimento: default a oggi, ma controlla se già salvata
+        if (dataInserimentoEl) {
+            // Prova a recuperare data_inserimento salvata (se documento già visto)
+            // Per ora usa sempre data odierna come default
+            const today = new Date();
+            const todayStr = today.toISOString().split('T')[0]; // YYYY-MM-DD
+            dataInserimentoEl.value = todayStr;
+        }
+        
         if (mittenteEl) mittenteEl.value = extractedData.mittente || '';
         if (destinatarioEl) destinatarioEl.value = extractedData.destinatario || '';
         if (numeroEl) numeroEl.value = extractedData.numero_documento || '';
@@ -481,6 +500,18 @@ class PreviewModal {
         formData.append('file_name', document.getElementById('preview-file-name').value);
         formData.append('original_data', document.getElementById('preview-original-data').value);
         formData.append('data', document.getElementById('preview-data').value);
+        
+        // Data di inserimento: converti da YYYY-MM-DD a gg-mm-yyyy
+        const dataInserimentoInput = document.getElementById('preview-data-inserimento');
+        if (!dataInserimentoInput || !dataInserimentoInput.value) {
+            alert('⚠️ La data di inserimento è obbligatoria');
+            return;
+        }
+        const dataInserimentoISO = dataInserimentoInput.value; // YYYY-MM-DD
+        const [year, month, day] = dataInserimentoISO.split('-');
+        const dataInserimentoFormatted = `${day}-${month}-${year}`; // gg-mm-yyyy
+        formData.append('data_inserimento', dataInserimentoFormatted);
+        
         formData.append('mittente', document.getElementById('preview-mittente').value);
         formData.append('destinatario', document.getElementById('preview-destinatario').value);
         formData.append('numero_documento', document.getElementById('preview-numero-documento').value);

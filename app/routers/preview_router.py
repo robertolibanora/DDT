@@ -259,12 +259,13 @@ async def save_preview(
     destinatario: str = Form(...),
     numero_documento: str = Form(...),
     totale_kg: str = Form(...),
+    data_inserimento: str = Form(...),  # Data di inserimento scelta dall'utente (gg-mm-yyyy)
     original_data: str = Form(None),
     annotations: str = Form(None),
     auth: bool = Depends(require_authentication)
 ):
     """
-    Salva i dati corretti dall'anteprima e applica l'apprendimento
+    Salva i dati corretti dall'anteprima, finalizza il documento e applica l'apprendimento
     """
     try:
         # Prepara i dati corretti - arrotonda a 3 decimali
@@ -287,26 +288,33 @@ async def save_preview(
             logger.warning("Impossibile parsare original_data, uso corrected_data")
             original_data_parsed = corrected_data
         
-        # Cerca il file originale nella cartella preview temp o inbox
+        # Valida data_inserimento
+        if not data_inserimento or not data_inserimento.strip():
+            raise HTTPException(status_code=422, detail="data_inserimento è obbligatoria")
+        
+        # Normalizza formato data (gg-mm-yyyy)
+        data_inserimento = data_inserimento.strip()
+        
+        # Cerca il file originale nella cartella inbox (priorità)
         file_path = None
+        inbox_path = Path(INBOX_DIR)
         
-        # Prima cerca nella cartella preview temp
-        preview_file = TEMP_PREVIEW_DIR / f"{file_hash}.pdf"
-        if preview_file.exists():
-            file_path = str(preview_file)
-        else:
-            # Cerca nella cartella inbox
-            inbox_path = Path(INBOX_DIR)
-            if inbox_path.exists():
-                for pdf_file in inbox_path.glob("*.pdf"):
-                    try:
-                        if get_file_hash(str(pdf_file)) == file_hash or pdf_file.name == file_name:
-                            file_path = str(pdf_file)
-                            break
-                    except:
-                        continue
+        if inbox_path.exists():
+            for pdf_file in inbox_path.glob("*.pdf"):
+                try:
+                    if get_file_hash(str(pdf_file)) == file_hash or pdf_file.name == file_name:
+                        file_path = str(pdf_file)
+                        break
+                except:
+                    continue
         
-        # Se non trovato, usa un path virtuale basato su hash
+        # Fallback: cerca nella cartella preview temp
+        if not file_path:
+            preview_file = TEMP_PREVIEW_DIR / f"{file_hash}.pdf"
+            if preview_file.exists():
+                file_path = str(preview_file)
+        
+        # Se non trovato, usa un path virtuale basato su hash (per correzioni senza file)
         if not file_path:
             file_path = f"temp/preview/{file_hash}_{file_name}"
         
@@ -326,13 +334,53 @@ async def save_preview(
         was_updated = update_or_append_to_excel(corrected_data)
         action = "aggiornato" if was_updated else "salvato"
         
-        # FINALIZZA il documento nel sistema di tracking
+        # FINALIZZAZIONE: rinomina, sposta e archivia il documento
+        final_path = None
+        finalization_error = None
+        
+        # Verifica che il file sia in inbox (necessario per finalizzazione)
+        inbox_path_obj = Path(INBOX_DIR)
+        file_path_obj = Path(file_path) if file_path else None
+        
+        if file_path_obj and file_path_obj.exists() and str(file_path_obj.resolve()).startswith(str(inbox_path_obj.resolve())):
+            try:
+                from app.finalization import finalize_document
+                from app.processed_documents import calculate_file_hash
+                
+                # Verifica hash corrispondenza
+                actual_hash = calculate_file_hash(str(file_path_obj))
+                if actual_hash != file_hash:
+                    logger.warning(f"⚠️ Hash mismatch: atteso {file_hash[:16]}..., trovato {actual_hash[:16]}...")
+                
+                # Finalizza il documento
+                success, final_path, error_msg = finalize_document(
+                    file_path=str(file_path_obj),
+                    doc_hash=file_hash,
+                    data_inserimento=data_inserimento,
+                    mittente=corrected_data["mittente"],
+                    destinatario=corrected_data["destinatario"],
+                    numero_documento=corrected_data["numero_documento"]
+                )
+                
+                if success:
+                    logger.info(f"✅ Documento finalizzato: {final_path}")
+                else:
+                    finalization_error = error_msg
+                    logger.error(f"❌ Errore finalizzazione: {error_msg}")
+                    
+            except Exception as e:
+                finalization_error = str(e)
+                logger.error(f"❌ Errore durante finalizzazione: {e}", exc_info=True)
+        else:
+            logger.warning(f"⚠️ File non in inbox, finalizzazione saltata: {file_path}")
+        
+        # FINALIZZA il documento nel sistema di tracking (con data_inserimento)
         try:
             from app.processed_documents import mark_document_finalized
-            mark_document_finalized(file_hash)
-            logger.info(f"✅ Documento FINALIZED dopo salvataggio Excel: hash={file_hash[:16]}... numero={corrected_data.get('numero_documento', 'N/A')}")
+            mark_document_finalized(file_hash, data_inserimento=data_inserimento)
+            logger.info(f"✅ Documento FINALIZED nel tracking: hash={file_hash[:16]}... data_inserimento={data_inserimento}")
         except Exception as e:
-            logger.warning(f"Errore finalizzazione documento: {e}")
+            logger.warning(f"Errore finalizzazione tracking: {e}")
         
         # Se questo file viene dalla coda watchdog, marcalo come processato
         try:
@@ -356,13 +404,23 @@ async def save_preview(
         
         logger.info(f"Anteprima {action}: {correction_id} - DDT {corrected_data.get('numero_documento')}")
         
-        return JSONResponse({
+        # Prepara risposta
+        response_data = {
             "success": True,
             "message": f"DDT {action} con successo",
             "updated": was_updated,
             "correction_id": correction_id,
-            "data": corrected_data
-        })
+            "data": corrected_data,
+            "finalized": final_path is not None,
+            "final_path": final_path
+        }
+        
+        # Se c'è stato un errore di finalizzazione, aggiungilo alla risposta
+        if finalization_error:
+            response_data["finalization_error"] = finalization_error
+            response_data["message"] = f"DDT {action} con successo, ma errore durante finalizzazione: {finalization_error}"
+        
+        return JSONResponse(response_data)
         
     except ValueError as e:
         logger.error(f"Errore validazione durante salvataggio anteprima: {e}")
