@@ -10,13 +10,12 @@
 }
 
 .section {
-    background: linear-gradient(135deg, var(--schiuma-bianca) 0%, var(--perla) 100%);
-    border-radius: 15px;
-    padding: 30px;
-    margin-bottom: 25px;
-    box-shadow: 0 8px 24px var(--ombra-profonda);
-    border: 2px solid var(--acqua-azzurra);
-    animation: fadeIn 0.5s ease-out;
+    background: var(--color-surface);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-xl);
+    margin-bottom: var(--spacing-lg);
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--color-border);
 }
 
 @keyframes fadeIn {
@@ -32,13 +31,37 @@
 
 .section h2 {
     margin-top: 0;
-    color: var(--oceano-profondo);
-    border-bottom: 3px solid var(--acqua-azzurra);
+    color: var(--color-text);
+    border-bottom: 1px solid var(--color-border);
     padding-bottom: 15px;
-    font-size: 1.5em;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 1px;
+    font-size: 1.25em;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+}
+
+.info-box {
+    background: var(--color-info-light);
+    padding: var(--spacing-md);
+    border-radius: var(--radius-md);
+    margin-bottom: var(--spacing-lg);
+    border-left: 3px solid var(--color-info);
+}
+
+.info-box p {
+    color: var(--color-text);
+    margin: 0;
+    line-height: 1.6;
+    font-size: 0.9375em;
+}
+
+.info-box strong {
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.info-box-success {
+    background: var(--color-success-light);
+    border-left-color: var(--color-success);
 }
 
 /* Lista regole */
@@ -124,13 +147,9 @@
 }
 
 .rule-name {
-    font-weight: bold;
-    font-size: 1.4em;
-    color: var(--oceano-profondo);
-    background: linear-gradient(135deg, var(--oceano-profondo) 0%, var(--acqua-azzurra) 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    font-weight: 600;
+    font-size: 1.25em;
+    color: var(--color-text);
 }
 
 .rule-actions {
@@ -173,18 +192,17 @@
 }
 
 .keyword-tag {
-    background: linear-gradient(135deg, var(--acqua-azzurra) 0%, var(--oceano-medio) 100%);
-    color: white;
-    padding: 6px 12px;
-    border-radius: 20px;
-    font-size: 0.85em;
-    font-weight: 600;
-    box-shadow: 0 2px 6px var(--ombreggiatura);
-    transition: transform 0.2s ease;
+    background: var(--color-primary);
+    color: var(--color-surface);
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 0.8125em;
+    font-weight: 500;
+    transition: all var(--transition-fast);
 }
 
 .keyword-tag:hover {
-    transform: scale(1.05);
+    background: var(--color-primary-dark);
 }
 
 /* Bottoni */
@@ -397,13 +415,6 @@
     font-size: 1.1em;
 }
 
-.empty-state::before {
-    content: '⚙️';
-    display: block;
-    font-size: 4em;
-    margin-bottom: 20px;
-    opacity: 0.6;
-}
 
 /* Indicatori override */
 .override-indicator {

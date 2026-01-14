@@ -2,7 +2,7 @@
 
 {% block title %}Carica DDT{% endblock %}
 
-{% block header_title %}📤 Carica DDT{% endblock %}
+{% block header_title %}Carica DDT{% endblock %}
 
 {% block extra_css %}
 {% endblock %}
@@ -26,30 +26,30 @@
 
             <div id="file-info" class="file-info hidden">
                 <div class="file-preview">
-                    <span class="file-icon">📄</span>
+                    <span class="file-icon"></span>
                     <div class="file-details">
                         <div class="file-name" id="file-name"></div>
                         <div class="file-size" id="file-size"></div>
                     </div>
-                    <button type="button" class="btn-remove" id="btn-remove">✕</button>
+                    <button type="button" class="btn-remove" id="btn-remove" aria-label="Rimuovi file">×</button>
                 </div>
             </div>
 
             <button type="submit" class="btn btn-primary" id="submit-btn">
-                <span id="btn-text">🔍 Estrai e Anteprima</span>
+                <span id="btn-text">Estrai e Anteprima</span>
                 <span id="btn-spinner" class="spinner hidden"></span>
             </button>
     </form>
     </div>
 
     <div class="card">
-        <h2>ℹ️ Informazioni</h2>
+        <h2>Informazioni</h2>
         <ul class="info-list">
-            <li>✅ Il sistema estrae automaticamente i dati dal DDT usando AI</li>
-            <li>✅ Dopo l'estrazione, apparirà un'anteprima per verificare e correggere i dati</li>
-            <li>✅ Conferma l'anteprima per salvare i dati in Excel</li>
-            <li>✅ Puoi anche copiare PDF nella cartella <code>inbox/</code> per elaborazione automatica</li>
-            <li>✅ Il sistema impara dalle tue correzioni per migliorare l'estrazione futura</li>
+            <li>Il sistema estrae automaticamente i dati dal DDT usando AI</li>
+            <li>Dopo l'estrazione, apparirà un'anteprima per verificare e correggere i dati</li>
+            <li>Conferma l'anteprima per salvare i dati in Excel</li>
+            <li>Puoi anche copiare PDF nella cartella <code>inbox/</code> per elaborazione automatica</li>
+            <li>Il sistema impara dalle tue correzioni per migliorare l'estrazione futura</li>
         </ul>
     </div>
 {% endblock %}
@@ -95,13 +95,13 @@
             const file = e.target.files[0];
             if (file) {
                 if (file.type !== 'application/pdf') {
-                    showMessage('⚠️ Solo file PDF sono supportati!', 'error');
+                    showMessage('Solo file PDF sono supportati', 'error');
                     fileInput.value = '';
                     return;
                 }
 
                 if (file.size > 10 * 1024 * 1024) {
-                    showMessage('⚠️ Il file è troppo grande! Massimo 10MB.', 'error');
+                    showMessage('Il file è troppo grande. Massimo 10MB', 'error');
                     fileInput.value = '';
                     return;
                 }
@@ -148,13 +148,13 @@
             
             const file = fileInput.files[0];
             if (!file) {
-                showMessage('⚠️ Seleziona un file prima di caricare', 'error');
+                showMessage('Seleziona un file prima di caricare', 'error');
                 return;
             }
 
             // Mostra stato di caricamento
             submitBtn.disabled = true;
-            btnText.textContent = '⏳ Elaborazione in corso...';
+            btnText.textContent = 'Elaborazione in corso...';
             btnSpinner.classList.remove('hidden');
             hideMessage();
 
@@ -228,27 +228,27 @@
                             fileInfo.classList.add('hidden');
                         } catch (modalError) {
                             console.error('Errore durante show modal:', modalError);
-                            showMessage('⚠️ Errore durante la visualizzazione dell\'anteprima: ' + modalError.message, 'error');
+                            showMessage('Errore durante la visualizzazione dell\'anteprima: ' + modalError.message, 'error');
                         }
                     } else {
                         console.error('previewModal non disponibile o show non è una funzione:', {
                             previewModal: window.previewModal,
                             hasShow: window.previewModal ? typeof window.previewModal.show : 'N/A'
                         });
-                        showMessage('⚠️ Errore: modal di anteprima non disponibile. Ricarica la pagina.', 'error');
+                        showMessage('Errore: modal di anteprima non disponibile. Ricarica la pagina.', 'error');
                     }
                 } else {
                     console.error('data.success è false:', data);
-                    showMessage('⚠️ Errore: impossibile mostrare l\'anteprima', 'error');
+                    showMessage('Errore: impossibile mostrare l\'anteprima', 'error');
                 }
 
             } catch (error) {
                 console.error('Errore upload:', error);
                 console.error('Stack:', error.stack);
-                showMessage(`❌ Errore: ${error.message}`, 'error');
+                showMessage(`Errore: ${error.message}`, 'error');
             } finally {
                 submitBtn.disabled = false;
-                btnText.textContent = '🔍 Estrai e Anteprima';
+                btnText.textContent = 'Estrai e Anteprima';
                 btnSpinner.classList.add('hidden');
             }
         });

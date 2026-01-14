@@ -2,7 +2,7 @@
 
 {% block title %}Modelli Layout{% endblock %}
 
-{% block header_title %}📐 Modelli Layout{% endblock %}
+{% block header_title %}Modelli Layout{% endblock %}
 
 {% block extra_css %}
 <link rel="stylesheet" href="/static/css/models.css">
@@ -10,7 +10,7 @@
 
 {% block content %}
     <div class="card">
-        <h2>📐 Modelli di Layout Salvati</h2>
+        <h2>Modelli di Layout Salvati</h2>
         <p class="page-description">
             Questi modelli vengono utilizzati automaticamente per estrarre i dati dai DDT quando il mittente corrisponde.
             Ogni modello definisce la posizione dei campi tramite riquadri grafici.
@@ -26,7 +26,7 @@
         </div>
         
         <div id="empty-state" class="empty-state hidden">
-            <p>🌊 Nessun modello salvato</p>
+            <p>Nessun modello salvato</p>
             <p>Usa il <a href="/layout-trainer">Layout Trainer</a> per creare il primo modello.</p>
         </div>
     </div>
@@ -37,7 +37,7 @@
         <div class="model-preview-container">
             <div class="model-preview-header">
                 <h3 id="preview-model-name">Anteprima Modello</h3>
-                <button class="model-preview-close" id="preview-close-btn">✕</button>
+                <button class="model-preview-close" id="preview-close-btn" aria-label="Chiudi">×</button>
             </div>
             <div class="model-preview-content">
                 <div class="preview-info">
@@ -47,7 +47,7 @@
                 </div>
                 <div class="preview-canvas-container">
                     <canvas id="preview-canvas"></canvas>
-                    <p class="preview-note">⚠️ L'immagine di esempio non è disponibile. I box sono mostrati su un'area generica.</p>
+                    <p class="preview-note">Nota: L'immagine di esempio non è disponibile. I box sono mostrati su un'area generica.</p>
                 </div>
             </div>
         </div>

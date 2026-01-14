@@ -2,7 +2,7 @@
 
 {% block title %}Gestione Regole{% endblock %}
 
-{% block header_title %}⚙️ Gestione Regole DDT{% endblock %}
+{% block header_title %}Gestione Regole DDT{% endblock %}
 
 {% block extra_css %}
 {% endblock %}
@@ -14,25 +14,25 @@
 {% block content %}
     <div class="rules-container">
         <div class="section">
-            <h2>📋 Regole Attive</h2>
-            <div style="background: linear-gradient(135deg, var(--perla) 0%, var(--spuma-bianca) 100%); padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid var(--acqua-azzurra);">
-                <p style="color: var(--oceano-profondo); margin: 0; line-height: 1.6;">
-                    <strong>ℹ️ Come funziona:</strong> Quando carichi un DDT PDF, il sistema estrae il testo e cerca automaticamente le keyword che hai definito. Se trova una corrispondenza, applica le istruzioni speciali che hai scritto, che vengono aggiunte al prompt AI per migliorare l'estrazione dati.
+            <h2>Regole Attive</h2>
+            <div class="info-box">
+                <p>
+                    <strong>Come funziona:</strong> Quando carichi un DDT PDF, il sistema estrae il testo e cerca automaticamente le keyword che hai definito. Se trova una corrispondenza, applica le istruzioni speciali che hai scritto, che vengono aggiunte al prompt AI per migliorare l'estrazione dati.
                 </p>
             </div>
-            <div style="background: linear-gradient(135deg, rgba(0, 200, 83, 0.1) 0%, rgba(0, 200, 83, 0.05) 100%); padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #00c853;">
-                <p style="color: var(--oceano-profondo); margin: 0; line-height: 1.6;">
-                    <strong>🤖 Apprendimento Automatico:</strong> Il sistema crea automaticamente regole quando riconosce pattern comuni nelle correzioni (dopo 5 correzioni simili). Le regole automatiche sono contrassegnate con l'icona 🤖 e possono essere modificate o eliminate come le regole manuali.
+            <div class="info-box info-box-success">
+                <p>
+                    <strong>Apprendimento Automatico:</strong> Il sistema crea automaticamente regole quando riconosce pattern comuni nelle correzioni (dopo 5 correzioni simili). Le regole automatiche sono contrassegnate e possono essere modificate o eliminate come le regole manuali.
                 </p>
             </div>
-            <button id="add-rule-btn" class="btn btn-add">➕ Aggiungi Nuova Regola</button>
+            <button id="add-rule-btn" class="btn btn-add">Aggiungi Nuova Regola</button>
             <div id="rules-list">
                 <div class="empty-state">Caricamento regole...</div>
             </div>
         </div>
 
         <div class="section reprocess-section">
-            <h2>🔄 Riprocessa DDT</h2>
+            <h2>Riprocessa DDT</h2>
             <p style="color: var(--oceano-medio); margin-bottom: 15px;">Riprocessa un DDT esistente usando le regole aggiornate. Inserisci il numero documento del DDT che vuoi riprocessare.</p>
             <div class="reprocess-form">
                 <input type="text" id="reprocess-doc-number" placeholder="Numero documento DDT (es: DDT-12345)">
@@ -82,7 +82,7 @@
 
                 <div style="display: flex; gap: 15px; margin-top: 25px; justify-content: flex-end;">
                     <button type="button" id="cancel-btn" class="btn btn-cancel">Annulla</button>
-                    <button type="submit" class="btn btn-save">💾 Salva Regola</button>
+                    <button type="submit" class="btn btn-save">Salva Regola</button>
                 </div>
             </form>
         </div>
@@ -141,7 +141,7 @@
                 const instructions = escapeHtml(rule.instructions || '');
                 const overrides = rule.overrides || {};
                 const isAuto = rule.is_auto || autoRules.includes(name);
-                const autoBadge = isAuto ? '<span class="auto-rule-badge" title="Regola creata automaticamente dal sistema">🤖 Auto</span>' : '';
+                const autoBadge = isAuto ? '<span class="auto-rule-badge" title="Regola creata automaticamente dal sistema">Auto</span>' : '';
                 
                 return `
                     <div class="rule-item ${isAuto ? 'rule-item-auto' : ''}" data-rule-name="${escapeHtml(name)}">
@@ -151,8 +151,8 @@
                                 ${autoBadge}
                             </div>
                             <div class="rule-actions">
-                                <button class="btn btn-edit" onclick="editRule('${escapeHtml(name)}')">✏️ Modifica</button>
-                                <button class="btn btn-delete" onclick="deleteRule('${escapeHtml(name)}')">🗑️ Elimina</button>
+                                <button class="btn btn-edit" onclick="editRule('${escapeHtml(name)}')">Modifica</button>
+                                <button class="btn btn-delete" onclick="deleteRule('${escapeHtml(name)}')">Elimina</button>
                             </div>
                         </div>
                         <div class="rule-details">
@@ -283,7 +283,7 @@
 
             try {
                 btn.disabled = true;
-                btn.textContent = '⏳ Riprocessamento...';
+                btn.textContent = 'Riprocessamento...';
                 resultDiv.classList.add('hidden');
 
                 const res = await fetch(`/reprocess/${encodeURIComponent(docNumber)}`, {
@@ -301,7 +301,7 @@
 
                 resultDiv.innerHTML = `
                     <div class="message success">
-                        ✅ ${data.message}<br>
+                        ${data.message}<br>
                         <strong>Dati estratti:</strong><br>
                         Data: ${data.data.data}<br>
                         Mittente: ${escapeHtml(data.data.mittente)}<br>
@@ -310,12 +310,12 @@
                     </div>
                 `;
                 resultDiv.classList.remove('hidden');
-                showMessage('DDT riprocessato con successo!');
+                showMessage('DDT riprocessato con successo');
             } catch (error) {
                 console.error('Errore reprocessing:', error);
                 resultDiv.innerHTML = `
                     <div class="message error">
-                        ❌ Errore: ${escapeHtml(error.message)}
+                        Errore: ${escapeHtml(error.message)}
                     </div>
                 `;
                 resultDiv.classList.remove('hidden');

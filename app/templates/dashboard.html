@@ -2,7 +2,7 @@
 
 {% block title %}Dashboard DDT{% endblock %}
 
-{% block header_title %}📦 Dashboard DDT{% endblock %}
+{% block header_title %}Dashboard DDT{% endblock %}
 
 {% block extra_css %}
 {% endblock %}
@@ -43,7 +43,7 @@
         </div>
         <div class="stat-item stat-actions">
             <button id="clear-all-btn" class="btn btn-clear" title="Cancella tutti i DDT">
-                🗑️ Svuota DDT
+                Svuota DDT
             </button>
         </div>
     </div>
@@ -256,7 +256,7 @@
                     const newestRow = newRows[0];
                     showToast({
                         type: 'success',
-                        message: `✅ Documento salvato: ${newestRow.numero_documento || 'DDT'}`,
+                        message: `Documento salvato: ${newestRow.numero_documento || 'DDT'}`,
                         duration: 3000
                     });
                 }
@@ -407,7 +407,7 @@
                 }
                 
                 // Mostra messaggio di successo
-                showError(`✅ ${data.message || 'Tutti i DDT sono stati cancellati con successo!'}`);
+                showError(`${data.message || 'Tutti i DDT sono stati cancellati con successo'}`);
                 setTimeout(() => hideError(), 5000);
                 
                 // Ricarica i dati
@@ -415,7 +415,7 @@
                 
             } catch (error) {
                 console.error('Errore cancellazione:', error);
-                showError(`❌ Errore: ${error.message}`);
+                showError(`Errore: ${error.message}`);
             } finally {
                 clearBtn.disabled = false;
                 clearBtn.textContent = originalText;
@@ -473,7 +473,7 @@
                             // Toast notification discreta con azione opzionale
                             showToast({
                                 type: 'info',
-                                message: `📄 Nuovo documento rilevato: ${newItem.file_name || 'DDT'}`,
+                                message: `Nuovo documento rilevato: ${newItem.file_name || 'DDT'}`,
                                 action: 'Apri anteprima',
                                 actionCallback: () => {
                                     if (window.previewModal) {
@@ -604,19 +604,8 @@
             toast.setAttribute('role', 'alert');
             toast.setAttribute('aria-live', 'polite');
             
-            // Icone per tipo (microcopy migliorata)
-            const icons = {
-                'info': '📄',
-                'success': '✅',
-                'warning': '⚠️',
-                'error': '❌'
-            };
-            
-            const icon = icons[type] || '📄';
-            
             toast.innerHTML = `
                 <div class="toast-content">
-                    <span class="toast-icon">${icon}</span>
                     <span class="toast-message">${escapeHtml(message)}</span>
                     ${action && actionCallback ? `<button class="toast-action" type="button">${escapeHtml(action)}</button>` : ''}
                 </div>

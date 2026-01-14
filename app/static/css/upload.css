@@ -9,11 +9,11 @@
 }
 
 .file-info {
-    margin: 20px 0;
-    padding: 15px;
-    background: var(--perla);
-    border-radius: 10px;
-    border: 2px solid var(--acqua-azzurra);
+    margin: var(--spacing-lg) 0;
+    padding: var(--spacing-md);
+    background: var(--color-surface-alt);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--color-border);
 }
 
 .file-preview {
@@ -31,34 +31,34 @@
 }
 
 .file-name {
-    font-weight: 600;
-    color: var(--oceano-profondo);
-    margin-bottom: 5px;
+    font-weight: 500;
+    color: var(--color-text);
+    margin-bottom: var(--spacing-xs);
 }
 
 .file-size {
-    font-size: 0.9em;
-    color: var(--oceano-medio);
+    font-size: 0.875em;
+    color: var(--color-text-secondary);
 }
 
 .btn-remove {
-    background: var(--corallo);
-    color: white;
+    background: var(--color-error);
+    color: var(--color-surface);
     border: none;
     border-radius: 50%;
-    width: 30px;
-    height: 30px;
+    width: 28px;
+    height: 28px;
     cursor: pointer;
-    font-size: 1.2em;
+    font-size: 1.125em;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.3s ease;
+    transition: all var(--transition-fast);
 }
 
 .btn-remove:hover {
-    background: #e55555;
-    transform: scale(1.1);
+    background: #dc2626;
+    transform: scale(1.05);
 }
 
 .info-list {
@@ -67,9 +67,9 @@
 }
 
 .info-list li {
-    padding: 10px 0;
-    border-bottom: 1px solid var(--perla);
-    color: var(--oceano-profondo);
+    padding: var(--spacing-sm) 0;
+    border-bottom: 1px solid var(--color-border-light);
+    color: var(--color-text);
 }
 
 .info-list li:last-child {

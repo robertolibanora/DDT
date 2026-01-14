@@ -6,14 +6,14 @@
 /* Stats container */
 #stats {
     display: flex;
-    gap: 30px;
+    gap: var(--spacing-lg);
     flex-wrap: wrap;
-    padding: 25px;
-    background: linear-gradient(135deg, var(--schiuma-bianca) 0%, var(--perla) 100%);
-    border-radius: 15px;
-    margin-bottom: 25px;
-    box-shadow: 0 4px 15px var(--ombreggiatura);
-    border: 2px solid var(--acqua-azzurra);
+    padding: var(--spacing-lg);
+    background: var(--color-surface);
+    border-radius: var(--radius-lg);
+    margin-bottom: var(--spacing-lg);
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--color-border);
 }
 
 .stat-item {
@@ -21,34 +21,29 @@
     flex-direction: column;
     flex: 1;
     min-width: 150px;
-    padding: 15px;
-    background: var(--schiuma-bianca);
-    border-radius: 10px;
-    box-shadow: 0 2px 8px var(--ombreggiatura);
-    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    padding: var(--spacing-md);
+    background: var(--color-surface-alt);
+    border-radius: var(--radius-md);
+    transition: all var(--transition-fast);
 }
 
 .stat-item:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 6px 20px var(--ombra-profonda);
+    box-shadow: var(--shadow-sm);
 }
 
 .stat-label {
-    font-size: 0.85em;
-    color: var(--oceano-medio);
-    margin-bottom: 8px;
+    font-size: 0.8125em;
+    color: var(--color-text-secondary);
+    margin-bottom: var(--spacing-xs);
     font-weight: 500;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.05em;
 }
 
 .stat-value {
-    font-size: 2em;
-    font-weight: bold;
-    background: linear-gradient(135deg, var(--oceano-profondo) 0%, var(--acqua-azzurra) 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    font-size: 1.875em;
+    font-weight: 600;
+    color: var(--color-text);
 }
 
 .stat-actions {
@@ -59,22 +54,19 @@
 }
 
 .btn-clear {
-    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
-    color: white;
+    background: var(--color-error);
+    color: var(--color-surface);
     border: none;
     padding: 12px 20px;
-    border-radius: 8px;
-    font-size: 0.95em;
-    font-weight: 600;
+    border-radius: var(--radius-md);
+    font-size: 0.9375em;
+    font-weight: 500;
     cursor: pointer;
-    transition: all 0.3s ease;
-    box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3);
+    transition: all var(--transition-fast);
 }
 
 .btn-clear:hover {
-    background: linear-gradient(135deg, #c82333 0%, #bd2130 100%);
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(220, 53, 69, 0.4);
+    background: #dc2626;
 }
 
 .btn-clear:active {
@@ -117,14 +109,10 @@ table td:last-child {
 }
 
 .last-update {
-    font-size: 0.9em;
-    color: #FFFFFF !important;
-    margin-top: 15px;
-    opacity: 0.95;
-    position: relative;
-    z-index: 1;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-    font-weight: 500;
+    font-size: 0.875em;
+    color: var(--color-text-secondary);
+    margin-top: var(--spacing-md);
+    font-weight: 400;
 }
 
 .refresh-indicator {
@@ -143,35 +131,36 @@ table {
     width: 100%;
     border-collapse: separate;
     border-spacing: 0;
-    background: var(--schiuma-bianca);
-    border-radius: 15px;
+    background: var(--color-surface);
+    border-radius: var(--radius-lg);
     overflow: hidden;
-    box-shadow: 0 8px 24px var(--ombra-profonda);
-    border: 2px solid var(--acqua-azzurra);
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--color-border);
 }
 
 thead {
-    background: linear-gradient(135deg, var(--oceano-profondo) 0%, var(--oceano-medio) 100%);
-    color: var(--schiuma-bianca);
+    background: var(--color-surface-alt);
+    color: var(--color-text);
 }
 
 th {
-    padding: 18px 15px;
+    padding: 14px var(--spacing-md);
     text-align: left;
     font-weight: 600;
+    font-size: 0.8125em;
+    color: var(--color-text-secondary);
     text-transform: uppercase;
-    letter-spacing: 0.5px;
-    font-size: 0.9em;
-    border-bottom: 3px solid var(--acqua-azzurra);
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid var(--color-border);
 }
 
 tbody tr {
-    border-bottom: 1px solid var(--perla);
-    transition: background-color 0.3s ease;
+    border-bottom: 1px solid var(--color-border-light);
+    transition: background-color var(--transition-fast);
 }
 
 tbody tr:hover {
-    background: linear-gradient(90deg, var(--perla) 0%, var(--spuma-bianca) 100%);
+    background: var(--color-surface-alt);
 }
 
 tbody tr:last-child {
@@ -180,32 +169,24 @@ tbody tr:last-child {
 
 /* Evidenzia l'ultimo documento inserito */
 tbody tr.newest-row {
-    background: linear-gradient(90deg, rgba(255, 0, 64, 0.1) 0%, rgba(255, 0, 64, 0.05) 100%);
-    border-left: 4px solid #ff0040;
+    background: var(--color-info-light);
+    border-left: 3px solid var(--color-info);
 }
 
 tbody tr.newest-row:hover {
-    background: linear-gradient(90deg, rgba(255, 0, 64, 0.15) 0%, rgba(255, 0, 64, 0.08) 100%);
+    background: var(--color-info-light);
 }
 
 td {
-    padding: 15px;
-    color: var(--oceano-profondo);
+    padding: var(--spacing-md);
+    color: var(--color-text);
 }
 
 .empty-state {
     text-align: center;
-    padding: 80px 20px;
-    color: var(--oceano-medio);
-    font-size: 1.2em;
-}
-
-.empty-state::before {
-    content: '🌊';
-    display: block;
-    font-size: 4em;
-    margin-bottom: 20px;
-    opacity: 0.6;
+    padding: 60px var(--spacing-lg);
+    color: var(--color-text-secondary);
+    font-size: 0.9375em;
 }
 
 /* Animazioni rimosse per evitare saltellamento */
@@ -229,19 +210,18 @@ td:last-child {
 }
 
 .badge-new {
-    background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
-    color: #1976d2;
-    animation: badgeFadeOut 2h forwards;
+    background: var(--color-info-light);
+    color: #1e40af;
 }
 
 .badge-error {
-    background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%);
-    color: #f57c00;
+    background: var(--color-error-light);
+    color: #991b1b;
 }
 
 .badge-completed {
-    background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
-    color: #388e3c;
+    background: var(--color-success-light);
+    color: #065f46;
 }
 
 @keyframes badgeFadeOut {
@@ -267,14 +247,13 @@ td:last-child {
     align-items: center;
     gap: 8px;
     padding: 6px 12px;
-    background: linear-gradient(135deg, rgba(255, 193, 7, 0.2) 0%, rgba(255, 193, 7, 0.1) 100%);
-    border: 1px solid rgba(255, 193, 7, 0.5);
-    border-radius: 20px;
-    color: #FFFFFF;
-    font-size: 0.85em;
-    font-weight: 600;
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-    transition: all 0.3s ease;
+    background: var(--color-warning-light);
+    border: 1px solid var(--color-warning);
+    border-radius: 16px;
+    color: var(--color-text);
+    font-size: 0.8125em;
+    font-weight: 500;
+    transition: all var(--transition-fast);
     cursor: pointer;
     user-select: none;
 }
@@ -284,9 +263,9 @@ td:last-child {
 }
 
 .watchdog-badge:hover {
-    background: linear-gradient(135deg, rgba(255, 193, 7, 0.4) 0%, rgba(255, 193, 7, 0.3) 100%);
-    transform: scale(1.05);
-    box-shadow: 0 4px 12px rgba(255, 193, 7, 0.3);
+    background: var(--color-warning);
+    color: var(--color-surface);
+    transform: scale(1.02);
 }
 
 .watchdog-badge:active {
@@ -302,12 +281,14 @@ td:last-child {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 24px;
-    height: 24px;
-    background: rgba(255, 193, 7, 0.9);
-    border-radius: 12px;
-    font-weight: 700;
+    min-width: 20px;
+    height: 20px;
+    background: var(--color-warning);
+    color: var(--color-surface);
+    border-radius: 10px;
+    font-weight: 600;
     padding: 0 6px;
+    font-size: 0.75em;
 }
 
 .badge-label {
@@ -344,18 +325,18 @@ td:last-child {
 }
 
 .toast {
-    background: linear-gradient(135deg, var(--schiuma-bianca) 0%, var(--perla) 100%);
-    border-radius: 12px;
-    padding: 16px;
-    box-shadow: 0 8px 24px rgba(10, 38, 71, 0.3);
-    border: 2px solid var(--acqua-azzurra);
+    background: var(--color-surface);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-md);
+    box-shadow: var(--shadow-lg);
+    border: 1px solid var(--color-border);
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
     opacity: 0;
     transform: translateX(400px);
-    transition: opacity 0.3s ease, transform 0.3s ease;
+    transition: opacity var(--transition-normal) ease, transform var(--transition-normal) ease;
     pointer-events: all;
     min-width: 300px;
 }
@@ -378,22 +359,22 @@ td:last-child {
 }
 
 .toast-message {
-    color: var(--oceano-profondo);
-    font-size: 0.9em;
-    line-height: 1.4;
+    color: var(--color-text);
+    font-size: 0.875em;
+    line-height: 1.5;
     flex: 1;
 }
 
 .toast-action {
-    background: linear-gradient(135deg, var(--oceano-profondo) 0%, var(--oceano-medio) 100%);
-    color: var(--schiuma-bianca);
+    background: var(--color-primary);
+    color: var(--color-surface);
     border: none;
     padding: 6px 12px;
-    border-radius: 6px;
-    font-size: 0.85em;
-    font-weight: 600;
+    border-radius: var(--radius-sm);
+    font-size: 0.8125em;
+    font-weight: 500;
     cursor: pointer;
-    transition: transform 0.2s ease;
+    transition: all var(--transition-fast);
     white-space: nowrap;
 }
 
@@ -404,8 +385,8 @@ td:last-child {
 .toast-close {
     background: transparent;
     border: none;
-    color: var(--oceano-medio);
-    font-size: 1.5em;
+    color: var(--color-text-secondary);
+    font-size: 1.25em;
     cursor: pointer;
     padding: 0;
     width: 24px;
@@ -414,27 +395,28 @@ td:last-child {
     align-items: center;
     justify-content: center;
     border-radius: 50%;
-    transition: background 0.2s ease;
+    transition: all var(--transition-fast);
 }
 
 .toast-close:hover {
-    background: rgba(10, 38, 71, 0.1);
+    background: var(--color-surface-alt);
+    color: var(--color-text);
 }
 
 .toast-info {
-    border-left: 4px solid #2196f3;
+    border-left: 3px solid var(--color-info);
 }
 
 .toast-success {
-    border-left: 4px solid #4caf50;
+    border-left: 3px solid var(--color-success);
 }
 
 .toast-warning {
-    border-left: 4px solid #ff9800;
+    border-left: 3px solid var(--color-warning);
 }
 
 .toast-error {
-    border-left: 4px solid #f44336;
+    border-left: 3px solid var(--color-error);
 }
 
 /* Responsive - già gestito in main.css, manteniamo solo override specifici */
