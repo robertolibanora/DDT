@@ -356,36 +356,38 @@ async def save_preview(
         if file_path_obj and file_path_obj.exists():
             file_path_obj = file_path_obj.resolve()
             if str(file_path_obj).startswith(str(inbox_path_obj.resolve())):
-            try:
-                from app.finalization import finalize_document
-                from app.processed_documents import calculate_file_hash
-                
-                # Verifica hash corrispondenza
-                actual_hash = calculate_file_hash(str(file_path_obj))
-                if actual_hash != file_hash:
-                    logger.warning(f"⚠️ Hash mismatch: atteso {file_hash[:16]}..., trovato {actual_hash[:16]}...")
-                
-                # Finalizza il documento
-                success, final_path, error_msg = finalize_document(
-                    file_path=str(file_path_obj),
-                    doc_hash=file_hash,
-                    data_inserimento=data_inserimento,
-                    mittente=corrected_data["mittente"],
-                    destinatario=corrected_data["destinatario"],
-                    numero_documento=corrected_data["numero_documento"]
-                )
-                
-                if success:
-                    logger.info(f"✅ Documento finalizzato: {final_path}")
-                else:
-                    finalization_error = error_msg
-                    logger.error(f"❌ Errore finalizzazione: {error_msg}")
+                try:
+                    from app.finalization import finalize_document
+                    from app.processed_documents import calculate_file_hash
                     
-            except Exception as e:
-                finalization_error = str(e)
-                logger.error(f"❌ Errore durante finalizzazione: {e}", exc_info=True)
+                    # Verifica hash corrispondenza
+                    actual_hash = calculate_file_hash(str(file_path_obj))
+                    if actual_hash != file_hash:
+                        logger.warning(f"⚠️ Hash mismatch: atteso {file_hash[:16]}..., trovato {actual_hash[:16]}...")
+                    
+                    # Finalizza il documento
+                    success, final_path, error_msg = finalize_document(
+                        file_path=str(file_path_obj),
+                        doc_hash=file_hash,
+                        data_inserimento=data_inserimento,
+                        mittente=corrected_data["mittente"],
+                        destinatario=corrected_data["destinatario"],
+                        numero_documento=corrected_data["numero_documento"]
+                    )
+                    
+                    if success:
+                        logger.info(f"✅ Documento finalizzato: {final_path}")
+                    else:
+                        finalization_error = error_msg
+                        logger.error(f"❌ Errore finalizzazione: {error_msg}")
+                        
+                except Exception as e:
+                    finalization_error = str(e)
+                    logger.error(f"❌ Errore durante finalizzazione: {e}", exc_info=True)
+            else:
+                logger.warning(f"⚠️ File non in inbox, finalizzazione saltata: {file_path}")
         else:
-            logger.warning(f"⚠️ File non in inbox, finalizzazione saltata: {file_path}")
+            logger.warning(f"⚠️ File non trovato o non accessibile, finalizzazione saltata: {file_path}")
         
         # FINALIZZA il documento nel sistema di tracking (con data_inserimento)
         try:
