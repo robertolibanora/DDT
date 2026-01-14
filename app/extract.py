@@ -233,12 +233,15 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
         
         if detection_result:
             layout_rule_name, layout_rule = detection_result
-            logger.info(f"📐 LAYOUT MODEL APPLIED: '{layout_rule_name}'")
-            logger.info(f"   Supplier: '{layout_rule.match.supplier}'")
-            logger.info(f"   Fields: {list(layout_rule.fields.keys())}")
+            logger.info(f"📐 LAYOUT MODEL MATCHED: '{layout_rule_name}'")
+            logger.info(f"   Supplier modello: '{layout_rule.match.supplier}'")
+            logger.info(f"   Fields disponibili: {list(layout_rule.fields.keys())}")
+            logger.info(f"   Page count modello: {layout_rule.match.page_count or 'Tutte'}")
+            logger.info(f"   Page count documento: {page_count}")
             extraction_mode = "LAYOUT_MODEL"
         else:
             logger.info(f"❌ LAYOUT MODEL SKIPPED: nessun match trovato nella pre-detection")
+            logger.info(f"   Motivo: nessun layout model ha superato la soglia di similarity")
             extraction_mode = "AI_FALLBACK"
         
         # HARD FAILOVER: Se layout model matcha, USA SOLO BOX EXTRACTION, NON chiamare LLM
@@ -246,47 +249,131 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
             supplier_name = layout_rule.match.supplier
             logger.info(f"📐 LAYOUT MODEL APPLIED: '{layout_rule_name}' - Using LAYOUT_MODEL extraction mode (NO LLM)")
             logger.info(f"   Supplier: '{supplier_name}'")
+            logger.info(f"   Fields disponibili nel modello: {list(layout_rule.fields.keys())}")
+            
+            # FIX #2: Verifica OCR disponibilità PRIMA di tentare estrazione
+            from app.text_extraction.ocr_fallback import is_ocr_available
+            ocr_available = is_ocr_available()
+            
+            if not ocr_available:
+                error_msg = (
+                    f"Layout model '{layout_rule_name}' richiede OCR ma OCR non è disponibile. "
+                    f"Installa pytesseract e tesseract-ocr: pip install pytesseract && apt-get install tesseract-ocr"
+                )
+                logger.error(f"❌ {error_msg}")
+                raise ValueError(error_msg)
             
             try:
                 box_raw_data = extract_with_layout_rule(file_path, layout_rule, supplier_name, page_count)
-                if box_raw_data:
-                    box_extracted_data = normalize_extracted_box_data(box_raw_data)
-                    logger.info(f"✅ Dati estratti da box: {list(box_extracted_data.keys())}")
-                    
-                    # Valida i dati estratti dai box
+                
+                # FIX #2: Distingui fallimento temporaneo (OCR) vs permanente (box vuoti)
+                if not box_raw_data:
+                    error_msg = (
+                        f"Layout model '{layout_rule_name}' matchato ma nessun campo estratto dai box. "
+                        f"Verifica che i box siano corretti nel layout model."
+                    )
+                    logger.error(f"❌ {error_msg}")
+                    logger.error(f"   OCR disponibile: {ocr_available}")
+                    raise ValueError(error_msg)
+                
+                box_extracted_data = normalize_extracted_box_data(box_raw_data)
+                
+                # Log diagnostico: campi estratti vs disponibili
+                total_fields = len(layout_rule.fields)
+                extracted_fields = len(box_extracted_data)
+                logger.info(f"✅ Dati estratti da box: {list(box_extracted_data.keys())}")
+                logger.info(f"📊 Box extraction stats: {extracted_fields}/{total_fields} campi estratti")
+                
+                # Valida i dati estratti dai box
+                try:
+                    normalized_data = box_extracted_data
+                    # Applica suggerimenti di apprendimento automatico
                     try:
-                        normalized_data = box_extracted_data
-                        # Applica suggerimenti di apprendimento automatico
-                        try:
-                            normalized_data = apply_learning_suggestions(normalized_data)
-                            logger.info("Suggerimenti di apprendimento applicati")
-                        except Exception as e:
-                            logger.warning(f"Errore applicazione suggerimenti apprendimento: {e}")
-                        
-                        # Valida usando Pydantic
-                        ddt_data = DDTData(**normalized_data)
-                        result = ddt_data.model_dump()
-                        logger.info(f"✅ Dati validati con successo (estrazione box)")
-                        logger.info(f"📊 Extraction mode used: {extraction_mode}")
-                        logger.info(f"📐 LAYOUT MODEL APPLIED: '{layout_rule_name}' - Estrazione completata senza AI")
-                        return result
-                    except ValidationError as e:
-                        logger.error(f"❌ Validazione fallita per dati box: {e}")
-                        logger.error(f"❌ Fallback to AI extraction due to validation failure")
+                        normalized_data = apply_learning_suggestions(normalized_data)
+                        logger.info("Suggerimenti di apprendimento applicati")
+                    except Exception as e:
+                        logger.warning(f"Errore applicazione suggerimenti apprendimento: {e}")
+                    
+                    # Valida usando Pydantic
+                    ddt_data = DDTData(**normalized_data)
+                    result = ddt_data.model_dump()
+                    logger.info(f"✅ Dati validati con successo (estrazione box)")
+                    logger.info(f"📊 Extraction mode used: {extraction_mode}")
+                    logger.info(f"📐 LAYOUT MODEL APPLIED: '{layout_rule_name}' - Estrazione completata senza AI")
+                    return result
+                except ValidationError as e:
+                    # FIX #4: Distingui campi mancanti vs invalidi
+                    error_fields = [err.get("loc", [])[0] for err in e.errors() if err.get("loc")]
+                    missing_fields = [f for f in error_fields if f not in box_extracted_data]
+                    invalid_fields = [f for f in error_fields if f in box_extracted_data]
+                    
+                    if missing_fields:
+                        # Campi mancanti → errore esplicito, NO fallback AI
+                        error_msg = (
+                            f"Layout model '{layout_rule_name}' estratto ma campi mancanti: {missing_fields}. "
+                            f"Campi estratti: {list(box_extracted_data.keys())}. "
+                            f"Verifica che tutti i campi siano definiti nel layout model."
+                        )
+                        logger.error(f"❌ {error_msg}")
+                        logger.error(f"   Campi mancanti: {missing_fields}")
+                        logger.error(f"   Campi estratti: {list(box_extracted_data.keys())}")
+                        raise ValueError(error_msg)
+                    else:
+                        # Campi presenti ma invalidi → fallback AI solo per correzione
+                        logger.warning(f"⚠️ Campi invalidi dopo box extraction: {invalid_fields}")
+                        logger.warning(f"   Fallback ad AI per correzione campi invalidi")
                         extraction_mode = "AI_FALLBACK"
-                        # Continua con AI extraction
-                else:
-                    logger.error(f"❌ Estrazione box fallita completamente")
-                    logger.error(f"❌ Fallback to AI extraction")
-                    extraction_mode = "AI_FALLBACK"
-                    # Continua con AI extraction
+                        # Continua con AI extraction per correggere campi invalidi
+                        
+            except ValueError as ve:
+                # ValueError espliciti (OCR non disponibile, box vuoti, campi mancanti) → rilanciare
+                raise
             except Exception as e:
                 logger.error(f"❌ Errore estrazione con layout rule: {e}", exc_info=True)
-                logger.error(f"❌ Fallback to AI extraction")
-                extraction_mode = "AI_FALLBACK"
-                # Continua con AI extraction
-        # Se siamo qui, extraction_mode è già impostato da detect_layout_model_advanced
-        # (LAYOUT_MODEL se matchato, AI_FALLBACK altrimenti)
+                error_msg = f"Errore durante estrazione con layout model '{layout_rule_name}': {e}"
+                raise ValueError(error_msg) from e
+        
+        # FIX #1: GUARD CLAUSE - Invariante extraction_mode
+        # Se layout_rule era matchato ma arriviamo qui, significa che box extraction è fallita
+        # NON procedere con AI extraction - solleva errore esplicito
+        # NOTA: Questa guard clause non dovrebbe mai essere raggiunta dopo i fix sopra,
+        # ma la manteniamo come safety check finale
+        if layout_rule and extraction_mode == "LAYOUT_MODEL":
+            logger.error(f"❌ CRITICAL: Layout model '{layout_rule_name}' matchato ma estrazione fallita")
+            logger.error(f"   Questo non dovrebbe mai accadere - tutti i casi dovrebbero essere gestiti sopra")
+            
+            # Distingui motivo fallimento per log chiaro
+            from app.text_extraction.ocr_fallback import is_ocr_available
+            ocr_available = is_ocr_available()
+            
+            if not ocr_available:
+                error_msg = (
+                    f"Layout model '{layout_rule_name}' richiede OCR ma OCR non è disponibile. "
+                    f"Installa pytesseract e tesseract-ocr: pip install pytesseract && apt-get install tesseract-ocr"
+                )
+                logger.error(f"   Motivo fallimento: OCR non disponibile")
+            elif 'box_extracted_data' in locals() and not box_extracted_data:
+                error_msg = (
+                    f"Layout model '{layout_rule_name}' matchato ma box extraction vuota. "
+                    f"Verifica che i box siano corretti nel layout model."
+                )
+                logger.error(f"   Motivo fallimento: box extraction vuota")
+            elif 'box_extracted_data' in locals():
+                error_msg = (
+                    f"Layout model '{layout_rule_name}' matchato ma validazione fallita. "
+                    f"Dati parziali estratti: {list(box_extracted_data.keys())}"
+                )
+                logger.error(f"   Motivo fallimento: validazione fallita")
+            else:
+                error_msg = (
+                    f"Layout model '{layout_rule_name}' matchato ma estrazione fallita prima di completare. "
+                    f"Verifica i log sopra per dettagli."
+                )
+                logger.error(f"   Motivo fallimento: errore durante estrazione")
+            
+            raise ValueError(error_msg)
+        
+        # Se siamo qui, extraction_mode è AI_FALLBACK (nessun layout matchato)
         
         # Log dettagli estrazione testo
         if text_extraction_result:
@@ -465,10 +552,17 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
         
         # HARD FAILOVER: Se extraction_mode è LAYOUT_MODEL, NON dovremmo essere qui
         # Se siamo qui, significa che extraction_mode è AI_FALLBACK
+        # (Questo check non dovrebbe mai essere raggiunto dopo FIX #1, ma lo manteniamo come safety check)
         if extraction_mode == "LAYOUT_MODEL":
-            logger.error(f"❌ CRITICAL: extraction_mode è LAYOUT_MODEL ma siamo nella sezione AI extraction!")
-            logger.error(f"❌ Questo non dovrebbe mai accadere - layout model dovrebbe aver già restituito")
-            extraction_mode = "AI_FALLBACK"  # Forza fallback per sicurezza
+            layout_rule_name_safe = layout_rule_name if 'layout_rule_name' in locals() else 'UNKNOWN'
+            error_msg = (
+                f"❌ CRITICAL BUG: extraction_mode è LAYOUT_MODEL ma siamo nella sezione AI extraction! "
+                f"Questo indica un bug nel codice - la guard clause (riga 341) non ha funzionato. "
+                f"Layout model '{layout_rule_name_safe}' dovrebbe aver già restituito."
+            )
+            logger.error(error_msg)
+            logger.error(f"   Stack trace completo necessario per debug")
+            raise RuntimeError(error_msg)  # RuntimeError invece di ValueError per bug critico
         
         # Applica suggerimenti di apprendimento automatico
         try:

@@ -283,11 +283,13 @@ def match_layout_rule(
         rule_supplier_original = match_criteria.supplier
         normalized_rule_supplier = normalize_sender(rule_supplier_original)
         
-        # Match page_count (se specificato nella regola)
+        # FIX #3: Page count check più flessibile - warning invece di hard skip
+        page_count_mismatch = False
         if match_criteria.page_count is not None:
             if page_count != match_criteria.page_count:
-                logger.debug(f"  ⏭️ Regola {rule_name}: page_count mismatch ({match_criteria.page_count} vs {page_count})")
-                continue
+                page_count_mismatch = True
+                logger.debug(f"  ⚠️ Regola {rule_name}: page_count mismatch ({match_criteria.page_count} vs {page_count})")
+                # Non skip immediato, ma penalizza se similarity bassa
         
         # Calcola similarity usando fuzzy matching
         similarity = calculate_sender_similarity(normalized_supplier, normalized_rule_supplier)
@@ -295,8 +297,21 @@ def match_layout_rule(
         logger.info(f"  📊 Modello candidato: '{rule_name}'")
         logger.info(f"     Supplier modello: '{rule_supplier_original}' (normalizzato: '{normalized_rule_supplier}')")
         logger.info(f"     Similarity score: {similarity:.3f} {'✅' if similarity >= similarity_threshold else '❌'}")
+        if page_count_mismatch:
+            logger.info(f"     ⚠️ Page count mismatch: regola={match_criteria.page_count}, doc={page_count}")
         
+        # FIX #3: Se page_count mismatch ma similarity alta (>= 0.8) → procedi con warning
         if similarity >= similarity_threshold:
+            if page_count_mismatch and similarity < 0.8:
+                # Similarity < 0.8 e page_count mismatch → skip
+                logger.debug(f"  ⏭️ Regola {rule_name} scartata: page_count mismatch e similarity < 0.8")
+                continue
+            elif page_count_mismatch:
+                # Similarity >= 0.8 ma page_count mismatch → warning ma procedi
+                logger.warning(
+                    f"  ⚠️ Page count mismatch ({match_criteria.page_count} vs {page_count}) "
+                    f"ma similarity alta ({similarity:.3f}) → procedo con warning"
+                )
             candidate_rules.append((rule_name, rule, similarity))
     
     if candidate_rules:
@@ -390,10 +405,13 @@ def detect_layout_model_advanced(
         supplier_words = supplier_normalized.split()[:3]
         keywords = [w for w in supplier_words if len(w) > 3]  # Solo parole > 3 caratteri
         
-        # Match page_count se specificato
+        # FIX #3: Page count check più flessibile - warning invece di hard skip
+        page_count_mismatch = False
         if match_criteria.page_count is not None:
             if page_count != match_criteria.page_count:
-                continue
+                page_count_mismatch = True
+                logger.debug(f"  ⚠️ Regola {rule_name}: page_count mismatch ({match_criteria.page_count} vs {page_count})")
+                # Non skip immediato, ma penalizza se similarity bassa
         
         best_similarity = 0.0
         match_reason = None
@@ -437,7 +455,18 @@ def detect_layout_model_advanced(
                 best_similarity = similarity
                 match_reason = f"fuzzy match diretto (mittente estratto: '{extracted_mittente}')"
         
+        # FIX #3: Se page_count mismatch ma similarity alta (>= 0.8) → procedi con warning
         if best_similarity >= similarity_threshold:
+            if page_count_mismatch and best_similarity < 0.8:
+                # Similarity < 0.8 e page_count mismatch → skip
+                logger.debug(f"  ⏭️ Regola {rule_name} scartata: page_count mismatch e similarity < 0.8")
+                continue
+            elif page_count_mismatch:
+                # Similarity >= 0.8 ma page_count mismatch → warning ma procedi
+                logger.warning(
+                    f"  ⚠️ Page count mismatch ({match_criteria.page_count} vs {page_count}) "
+                    f"ma similarity alta ({best_similarity:.3f}) → procedo con warning"
+                )
             logger.info(f"  📊 Modello candidato: '{rule_name}'")
             logger.info(f"     Supplier modello: '{supplier_original}' (normalizzato: '{supplier_normalized}')")
             logger.info(f"     Similarity score: {best_similarity:.3f} ✅")
@@ -453,12 +482,25 @@ def detect_layout_model_advanced(
         logger.info(f"   Similarity score: {best_similarity:.3f} (threshold: {similarity_threshold:.2f})")
         logger.info(f"   Match reason: {match_reason}")
         logger.info(f"   Supplier modello: '{rule.match.supplier}'")
+        logger.info(f"   Supplier normalizzato: '{normalize_sender(rule.match.supplier)}'")
         
-        # Log altri candidati se presenti
+        # Log diagnostico: mittente estratto vs modello (se disponibile)
+        if extracted_mittenti:
+            logger.info(f"   Mittente estratto dal documento: '{extracted_mittenti[0]}'")
+            logger.info(f"   Mittente normalizzato: '{normalize_sender(extracted_mittenti[0])}'")
+            logger.info(f"   Similarity mittente estratto vs modello: {best_similarity:.3f}")
+        
+        # Log page count se specificato
+        if match_criteria.page_count is not None:
+            logger.info(f"   Page count modello: {match_criteria.page_count}, documento: {page_count}")
+            if page_count_mismatch:
+                logger.warning(f"   ⚠️ Page count mismatch ma similarity alta → procedo")
+        
+        # Log altri candidati se presenti (top 3)
         if len(candidate_rules) > 1:
-            logger.info(f"   Altri candidati scartati:")
-            for other_name, _, other_sim, other_reason in candidate_rules[1:]:
-                logger.info(f"     - {other_name}: similarity {other_sim:.3f} ({other_reason})")
+            logger.info(f"   Top candidati:")
+            for idx, (other_name, _, other_sim, other_reason) in enumerate(candidate_rules[:3], 1):
+                logger.info(f"     {idx}. {other_name}: similarity {other_sim:.3f} ({other_reason})")
         
         return (rule_name, rule)
     else:
