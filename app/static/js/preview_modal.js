@@ -414,6 +414,16 @@ class PreviewModal {
                 if (imageWrapper) {
                     imageWrapper.style.display = 'block';
                 }
+                
+                // Assicura che l'immagine sia sempre visibile completamente
+                // Reset eventuali trasformazioni che potrebbero tagliare
+                if (imageWrapper) {
+                    imageWrapper.classList.remove('zoomed');
+                }
+                
+                // Scrolla in alto per mostrare l'inizio del documento
+                pdfContainer.scrollTop = 0;
+                pdfContainer.scrollLeft = 0;
             };
             imgElement.onerror = () => {
                 console.error('Errore caricamento immagine anteprima');
@@ -426,14 +436,30 @@ class PreviewModal {
                 }
             };
             
-            // Aggiungi click per zoom toggle
+            // Aggiungi click per zoom toggle (solo se immagine caricata)
             if (imageWrapper) {
                 // Rimuovi listener precedenti per evitare duplicati
-                const newWrapper = imageWrapper.cloneNode(true);
-                imageWrapper.parentNode.replaceChild(newWrapper, imageWrapper);
-                newWrapper.addEventListener('click', () => {
-                    newWrapper.classList.toggle('zoomed');
-                });
+                const existingWrapper = imageWrapper;
+                const clickHandler = (e) => {
+                    // Zoom solo se l'immagine è caricata
+                    if (imgElement.src && imgElement.complete && imgElement.naturalHeight !== 0) {
+                        existingWrapper.classList.toggle('zoomed');
+                        // Scrolla in alto dopo zoom per vedere l'inizio
+                        if (existingWrapper.classList.contains('zoomed')) {
+                            setTimeout(() => {
+                                pdfContainer.scrollTop = 0;
+                            }, 200);
+                        }
+                    }
+                };
+                
+                // Rimuovi listener precedenti
+                const newWrapper = existingWrapper.cloneNode(true);
+                existingWrapper.parentNode.replaceChild(newWrapper, existingWrapper);
+                newWrapper.addEventListener('click', clickHandler);
+                
+                // Aggiorna riferimento
+                this.imgElement = document.getElementById('preview-pdf-image');
             }
         }
 

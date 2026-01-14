@@ -94,13 +94,34 @@ def add_to_queue(file_path: str, extracted_data: Dict[str, Any], pdf_base64: str
 def get_pending_items() -> List[Dict[str, Any]]:
     """
     Ottiene tutti gli elementi in coda non ancora processati
+    Filtra anche i documenti già FINALIZED per evitare conteggi errati
     
     Returns:
-        Lista di elementi in coda
+        Lista di elementi in coda non processati e non finalizzati
     """
     with _queue_lock:
         _load_queue()
-        return [item for item in _watchdog_queue if not item.get("processed", False)]
+        from app.processed_documents import get_document_status, DocumentStatus
+        
+        pending_items = []
+        for item in _watchdog_queue:
+            # Escludi elementi già processati
+            if item.get("processed", False):
+                continue
+            
+            # Escludi documenti già FINALIZED o ERROR_FINAL
+            file_hash = item.get("file_hash")
+            if file_hash:
+                status = get_document_status(file_hash)
+                if status in (DocumentStatus.FINALIZED.value, DocumentStatus.ERROR_FINAL.value):
+                    # Marca come processato se è già finalizzato
+                    item["processed"] = True
+                    _save_queue()
+                    continue
+            
+            pending_items.append(item)
+        
+        return pending_items
 
 
 def get_all_items() -> List[Dict[str, Any]]:

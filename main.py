@@ -130,6 +130,8 @@ class DDTHandler(FileSystemEventHandler):
                     logger.info(f"⏭️ Documento in ERROR_FINAL (hash={doc_hash[:16]}...), ignoro evento watchdog - {Path(file_path).name}")
                 elif reason == "already_processing":
                     logger.info(f"⏭️ Documento già in PROCESSING (hash={doc_hash[:16]}...), ignoro evento watchdog - {Path(file_path).name}")
+                elif reason == "already_ready":
+                    logger.debug(f"⏭️ Documento già READY (hash={doc_hash[:16]}...), ignoro evento watchdog - {Path(file_path).name}")
                 else:
                     logger.info(f"⏭️ Documento non processabile: {reason} (hash={doc_hash[:16]}...) - {Path(file_path).name}")
                 return
@@ -175,10 +177,12 @@ class DDTHandler(FileSystemEventHandler):
             pdf_base64 = base64.b64encode(pdf_bytes).decode()
             
             # Genera PNG di anteprima
+            preview_generated = False
             try:
                 preview_path = generate_preview_png(file_path, doc_hash)
                 if preview_path:
                     logger.info(f"✅ PNG anteprima generata: {preview_path}")
+                    preview_generated = True
                 else:
                     logger.warning(f"⚠️ Impossibile generare PNG anteprima per {doc_hash[:16]}...")
             except Exception as e:
@@ -188,8 +192,11 @@ class DDTHandler(FileSystemEventHandler):
             queue_id = add_to_queue(file_path, data, pdf_base64, doc_hash)
             logger.info(f"📋 DDT aggiunto alla coda per anteprima: queue_id={queue_id} hash={doc_hash[:16]}... numero={data.get('numero_documento', 'N/A')}")
             
-            # Aggiorna registro con queue_id (rimane PROCESSING fino a finalizzazione)
-            register_document(file_path, doc_hash, DocumentStatus.PROCESSING, queue_id)
+            # Marca come READY quando tutto è pronto (dati estratti + PNG + coda)
+            # Questo permette alla dashboard di distinguere PROCESSING reali da READY
+            from app.processed_documents import mark_document_ready
+            mark_document_ready(doc_hash, queue_id)
+            logger.info(f"✅ Documento READY per anteprima: hash={doc_hash[:16]}... numero={data.get('numero_documento', 'N/A')}")
             
         except ValueError as e:
             logger.error(f"❌ Errore validazione DDT: {e}")

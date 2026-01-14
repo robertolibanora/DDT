@@ -20,6 +20,7 @@ _documents_lock = threading.Lock()
 class DocumentStatus(str, Enum):
     NEW = "NEW"
     PROCESSING = "PROCESSING"
+    READY = "READY"  # Documento pronto per anteprima (dati estratti, PNG generata)
     FINALIZED = "FINALIZED"
     ERROR_FINAL = "ERROR_FINAL"
 
@@ -124,6 +125,37 @@ def is_document_finalized(doc_hash: str) -> bool:
         
         status = doc.get("status", "")
         return status in (DocumentStatus.FINALIZED.value, DocumentStatus.ERROR_FINAL.value)
+
+
+def mark_document_ready(doc_hash: str, queue_id: Optional[str] = None) -> None:
+    """
+    Marca un documento come READY (pronto per anteprima)
+    Viene chiamato quando:
+    - Dati sono stati estratti con successo
+    - PNG anteprima è stata generata
+    - Documento è stato aggiunto alla coda watchdog
+    
+    Args:
+        doc_hash: Hash SHA256 del documento
+        queue_id: ID opzionale della coda watchdog
+    """
+    with _documents_lock:
+        data = _load_documents()
+        documents = data.setdefault("documents", {})
+        
+        if doc_hash in documents:
+            doc = documents[doc_hash]
+            # Aggiorna solo se non è già FINALIZED o ERROR_FINAL
+            if doc.get("status") not in (DocumentStatus.FINALIZED.value, DocumentStatus.ERROR_FINAL.value):
+                doc["status"] = DocumentStatus.READY.value
+                doc["last_updated"] = datetime.now().isoformat()
+                if queue_id:
+                    doc["queue_id"] = queue_id
+                _save_documents(data)
+                logger.info(f"✅ Documento READY: hash={doc_hash[:16]}... file={doc.get('file_name', 'N/A')}")
+        else:
+            # Se non esiste, crealo come READY
+            register_document("", doc_hash, DocumentStatus.READY, queue_id)
 
 
 def is_document_processing(doc_hash: str) -> bool:
@@ -299,6 +331,10 @@ def should_process_document(doc_hash: str) -> tuple[bool, str]:
         
         if status == DocumentStatus.PROCESSING.value:
             return False, "already_processing"
+        
+        if status == DocumentStatus.READY.value:
+            # READY significa già processato e pronto per anteprima
+            return False, "already_ready"
         
         # NEW o altri stati possono essere riprocessati
         return True, "reprocess_allowed"

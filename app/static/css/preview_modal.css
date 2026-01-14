@@ -139,16 +139,19 @@
 .preview-pdf-container {
     width: 100%;
     min-height: 700px;
-    border: 1px solid #e0e0e0; /* Bordo sottile grigio chiaro */
+    max-height: calc(95vh - 200px); /* Altezza massima considerando header e padding */
+    border: 1px solid #e0e0e0;
     border-radius: var(--radius-md);
-    overflow: auto;
-    background: #ffffff; /* BIANCO PURO - fondamentale per leggibilità */
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1), inset 0 0 0 1px rgba(0, 0, 0, 0.05); /* Shadow tipo "foglio" */
+    overflow-y: auto; /* SOLO scroll verticale sul container */
+    overflow-x: auto; /* Scroll orizzontale se necessario */
+    background: #ffffff;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1), inset 0 0 0 1px rgba(0, 0, 0, 0.05);
     display: flex;
-    align-items: center;
+    align-items: flex-start; /* Allinea in alto per scroll corretto */
     justify-content: center;
-    padding: 40px; /* Più padding per respirare */
+    padding: 40px;
     position: relative;
+    -webkit-overflow-scrolling: touch; /* Smooth scroll su iOS */
 }
 
 /* Placeholder elegante quando preview non disponibile */
@@ -207,31 +210,47 @@
 
 .preview-image-wrapper {
     position: relative;
-    display: inline-block;
-    max-width: 100%;
-    margin: 0 auto;
-    transform: scale(1.3); /* Zoom iniziale 130% per migliore leggibilità */
-    transform-origin: center center;
+    display: block;
+    width: 100%;
+    margin: 0;
+    /* RIMOSSO transform scale iniziale - causa taglio del documento */
     transition: transform 0.2s ease;
     cursor: zoom-in;
+    /* Assicura che il wrapper non esca dal container */
+    max-width: 100%;
+    box-sizing: border-box;
+    /* Permette scroll naturale senza tagli */
+    flex-shrink: 0;
 }
 
 .preview-image-wrapper.zoomed {
-    transform: scale(2.0); /* Zoom al doppio click */
+    transform: scale(1.5); /* Zoom 150% al click (non 200% per evitare taglio) */
     cursor: zoom-out;
+    transform-origin: top center; /* Zoom dall'alto per scroll naturale */
 }
 
 .preview-image-wrapper img {
     display: block;
+    width: 100%;
     max-width: 100%;
     height: auto;
+    min-height: auto;
     position: relative;
     z-index: 1;
     border-radius: 4px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15); /* Shadow pronunciata tipo documento */
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
     background: #ffffff;
     padding: 8px;
     border: 1px solid rgba(0, 0, 0, 0.1);
+    /* OBBLIGATORIO: mantiene proporzioni e non taglia mai */
+    object-fit: contain !important;
+    object-position: top center !important;
+    /* Assicura che l'immagine sia sempre contenuta e scrollabile */
+    box-sizing: border-box;
+    /* Mantiene dimensioni naturali dell'immagine */
+    image-rendering: -webkit-optimize-contrast;
+    image-rendering: crisp-edges;
+    filter: contrast(1.05) brightness(1.02);
 }
 
 /* Rimuovi overlay che oscura l'immagine */
@@ -378,20 +397,17 @@
     font-weight: 500;
 }
 
+/* Regole aggiuntive per garantire che l'immagine PDF sia sempre visibile */
 .preview-pdf-container img {
-    max-width: 100%;
-    max-height: 100%;
-    height: auto;
-    width: auto;
-    border-radius: 4px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
-    object-fit: contain;
-    background: #ffffff;
-    padding: 8px;
-    border: 1px solid rgba(0, 0, 0, 0.1);
-    image-rendering: -webkit-optimize-contrast; /* Migliora contrasto su Safari */
-    image-rendering: crisp-edges; /* Migliora nitidezza */
-    filter: contrast(1.05) brightness(1.02); /* Leggero aumento contrasto e luminosità */
+    /* Queste regole sono già definite in .preview-image-wrapper img */
+    /* Mantenute qui per override esplicito se necessario */
+    max-width: 100% !important;
+    max-height: none !important; /* Rimosso max-height per permettere scroll completo */
+    height: auto !important;
+    width: 100% !important;
+    object-fit: contain !important; /* OBBLIGATORIO: non taglia mai */
+    object-position: top center !important;
+    box-sizing: border-box !important;
 }
 
 /* Rimuovuto overlay che oscura l'immagine - non necessario con background bianco */
@@ -623,15 +639,17 @@
     
     .preview-pdf-container {
         min-height: 400px;
-        max-height: 500px;
+        max-height: 60vh; /* Altezza relativa alla viewport */
+        padding: 20px;
     }
     
+    /* Nessun zoom iniziale su mobile - immagine sempre visibile */
     .preview-image-wrapper {
-        transform: scale(1.1); /* Zoom ridotto su schermi piccoli */
+        transform: scale(1.0); /* Nessun zoom iniziale */
     }
     
     .preview-image-wrapper.zoomed {
-        transform: scale(1.6);
+        transform: scale(1.3); /* Zoom ridotto su mobile */
     }
 }
 
