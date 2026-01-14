@@ -87,6 +87,15 @@ async def reprocess_ddt(numero_documento: str, http_request: Request, request_da
             was_updated = update_or_append_to_excel(extracted_data)
             action = "aggiornato" if was_updated else "aggiunto"
             
+            # FINALIZZA il documento nel sistema di tracking
+            try:
+                from app.processed_documents import calculate_file_hash, mark_document_finalized
+                doc_hash = calculate_file_hash(pdf_path)
+                mark_document_finalized(doc_hash)
+                logger.info(f"✅ Documento FINALIZED dopo reprocess: hash={doc_hash[:16]}... numero={numero_documento}")
+            except Exception as e:
+                logger.warning(f"Errore finalizzazione documento dopo reprocess: {e}")
+            
             logger.info(f"DDT '{numero_documento}' riprocessato con successo ({action})")
             
             return {
@@ -138,6 +147,15 @@ async def reprocess_by_file(http_request: Request, request_data: Dict[str, Any],
         # Aggiorna il file Excel (sovrascrive la riga esistente se presente, altrimenti aggiunge)
         was_updated = update_or_append_to_excel(extracted_data)
         action = "aggiornato" if was_updated else "aggiunto"
+        
+        # FINALIZZA il documento nel sistema di tracking
+        try:
+            from app.processed_documents import calculate_file_hash, mark_document_finalized
+            doc_hash = calculate_file_hash(file_path)
+            mark_document_finalized(doc_hash)
+            logger.info(f"✅ Documento FINALIZED dopo reprocess by-file: hash={doc_hash[:16]}... numero={numero_documento}")
+        except Exception as e:
+            logger.warning(f"Errore finalizzazione documento dopo reprocess by-file: {e}")
         
         logger.info(f"DDT '{numero_documento}' riprocessato con successo ({action})")
         

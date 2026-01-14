@@ -78,28 +78,8 @@ class DDTHandler(FileSystemEventHandler):
         return False
     
     def __init__(self):
-        """Inizializza l'handler con un set di file già processati"""
+        """Inizializza l'handler con il sistema di tracking persistente"""
         super().__init__()
-        self._processed_files = set()  # Set di hash di file già processati
-        self._processing_files = set()  # Set di file attualmente in elaborazione (per evitare race condition)
-    
-    def _is_file_already_processed(self, file_hash: str) -> bool:
-        """Verifica se un file è già stato processato"""
-        # Controlla nella cache locale
-        if file_hash in self._processed_files:
-            return True
-        
-        # Controlla nella coda watchdog (sia pending che processed)
-        try:
-            from app.watchdog_queue import is_file_hash_in_queue
-            if is_file_hash_in_queue(file_hash):
-                # Se trovato, aggiungi alla cache locale
-                self._processed_files.add(file_hash)
-                return True
-        except Exception as e:
-            logger.debug(f"Errore controllo coda watchdog: {e}")
-        
-        return False
     
     def _process_pdf(self, file_path: str):
         """Processa un file PDF rilevato dal watchdog - aggiunge alla coda per anteprima"""
@@ -115,24 +95,35 @@ class DDTHandler(FileSystemEventHandler):
             return
         
         try:
-            from app.corrections import get_file_hash
+            from app.processed_documents import (
+                calculate_file_hash,
+                should_process_document,
+                register_document,
+                mark_document_error,
+                DocumentStatus
+            )
             
-            # Calcola hash PRIMA di processare
-            file_hash = get_file_hash(file_path)
+            # Calcola hash SHA256 PRIMA di qualsiasi controllo
+            doc_hash = calculate_file_hash(file_path)
             
-            # Verifica se il file è già stato processato o è in elaborazione
-            if file_hash in self._processing_files:
-                logger.debug(f"⏭️ File già in elaborazione, salto: {file_path}")
+            # Verifica se il documento dovrebbe essere processato
+            should_process, reason = should_process_document(doc_hash)
+            
+            if not should_process:
+                if reason == "already_finalized":
+                    logger.info(f"⏭️ Documento già FINALIZED (hash={doc_hash[:16]}...), ignoro evento watchdog - {Path(file_path).name}")
+                elif reason == "error_final":
+                    logger.info(f"⏭️ Documento in ERROR_FINAL (hash={doc_hash[:16]}...), ignoro evento watchdog - {Path(file_path).name}")
+                elif reason == "already_processing":
+                    logger.info(f"⏭️ Documento già in PROCESSING (hash={doc_hash[:16]}...), ignoro evento watchdog - {Path(file_path).name}")
+                else:
+                    logger.info(f"⏭️ Documento non processabile: {reason} (hash={doc_hash[:16]}...) - {Path(file_path).name}")
                 return
             
-            if self._is_file_already_processed(file_hash):
-                logger.info(f"⏭️ File già processato, salto: {file_path}")
-                return
+            # Registra come PROCESSING
+            register_document(file_path, doc_hash, DocumentStatus.PROCESSING)
             
-            # Marca come in elaborazione
-            self._processing_files.add(file_hash)
-            
-            logger.info(f"📄 Nuovo DDT rilevato: {file_path}")
+            logger.info(f"📄 Nuovo DDT rilevato: hash={doc_hash[:16]}... file={Path(file_path).name}")
             
             import base64
             from app.watchdog_queue import add_to_queue
@@ -143,7 +134,7 @@ class DDTHandler(FileSystemEventHandler):
             
             if len(pdf_bytes) == 0:
                 logger.warning(f"⚠️ File PDF vuoto: {file_path}")
-                self._processing_files.discard(file_hash)
+                mark_document_error(doc_hash, "File PDF vuoto")
                 return
             
             # Estrai i dati (ma NON salvare ancora)
@@ -156,65 +147,80 @@ class DDTHandler(FileSystemEventHandler):
                 for row in existing_data.get("rows", []):
                     if (row.get("numero_documento") == data.get("numero_documento") and 
                         row.get("mittente", "").strip() == data.get("mittente", "").strip()):
-                        logger.info(f"⏭️ DDT già presente in Excel (numero: {data.get('numero_documento')}), salto: {file_path}")
-                        self._processed_files.add(file_hash)
-                        self._processing_files.discard(file_hash)
+                        logger.info(f"⏭️ DDT già presente in Excel (numero: {data.get('numero_documento')}), marco come FINALIZED - {Path(file_path).name}")
+                        from app.processed_documents import mark_document_finalized
+                        mark_document_finalized(doc_hash)
                         return
-            except:
-                pass  # Se c'è un errore nella lettura Excel, continua comunque
+            except Exception as e:
+                logger.debug(f"Errore controllo Excel: {e}")
+                # Continua comunque
             
             # Converti PDF in base64
             pdf_base64 = base64.b64encode(pdf_bytes).decode()
             
             # Genera PNG di anteprima
             try:
-                preview_path = generate_preview_png(file_path, file_hash)
+                preview_path = generate_preview_png(file_path, doc_hash)
                 if preview_path:
                     logger.info(f"✅ PNG anteprima generata: {preview_path}")
                 else:
-                    logger.warning(f"⚠️ Impossibile generare PNG anteprima per {file_hash}")
+                    logger.warning(f"⚠️ Impossibile generare PNG anteprima per {doc_hash[:16]}...")
             except Exception as e:
                 logger.warning(f"⚠️ Errore generazione PNG anteprima: {e}")
             
             # Aggiungi alla coda per l'anteprima
-            queue_id = add_to_queue(file_path, data, pdf_base64, file_hash)
-            logger.info(f"📋 DDT aggiunto alla coda per anteprima: {queue_id} - {data.get('numero_documento', 'N/A')}")
+            queue_id = add_to_queue(file_path, data, pdf_base64, doc_hash)
+            logger.info(f"📋 DDT aggiunto alla coda per anteprima: queue_id={queue_id} hash={doc_hash[:16]}... numero={data.get('numero_documento', 'N/A')}")
             
-            # Rimuovi da processing e aggiungi a processed dopo un breve delay
-            # per permettere al frontend di processarlo
-            self._processing_files.discard(file_hash)
+            # Aggiorna registro con queue_id (rimane PROCESSING fino a finalizzazione)
+            register_document(file_path, doc_hash, DocumentStatus.PROCESSING, queue_id)
             
         except ValueError as e:
             logger.error(f"❌ Errore validazione DDT: {e}")
-            self._processing_files.discard(file_hash) if 'file_hash' in locals() else None
+            if 'doc_hash' in locals():
+                mark_document_error(doc_hash, f"Errore validazione: {str(e)}")
         except FileNotFoundError:
             logger.warning(f"⚠️ File non trovato (potrebbe essere stato spostato): {file_path}")
-            self._processing_files.discard(file_hash) if 'file_hash' in locals() else None
+            if 'doc_hash' in locals():
+                mark_document_error(doc_hash, "File non trovato")
         except Exception as e:
             logger.error(f"❌ Errore nel parsing DDT: {e}", exc_info=True)
-            self._processing_files.discard(file_hash) if 'file_hash' in locals() else None
+            if 'doc_hash' in locals():
+                mark_document_error(doc_hash, f"Errore parsing: {str(e)}")
     
     def on_created(self, event):
-        """Gestisce l'evento di creazione file"""
-        if not event.is_directory and self._is_pdf_file(event.src_path):
-            # Usa un thread separato per non bloccare il watchdog
-            thread = threading.Thread(target=self._process_pdf, args=(event.src_path,), daemon=True)
-            thread.start()
+        """Gestisce SOLO l'evento di creazione file (ignora modified per idempotenza)"""
+        # Filtra SOLO file PDF (non directory)
+        if event.is_directory:
+            return
+        
+        # Filtra SOLO file .pdf (case-insensitive)
+        if not event.src_path.lower().endswith(".pdf"):
+            return
+        
+        # Usa un thread separato per non bloccare il watchdog
+        thread = threading.Thread(target=self._process_pdf, args=(event.src_path,), daemon=True)
+        thread.start()
     
     def on_moved(self, event):
         """Gestisce l'evento di spostamento file (quando un file viene copiato/spostato in inbox)"""
-        if not event.is_directory and self._is_pdf_file(event.dest_path):
-            # Usa un thread separato per non bloccare il watchdog
-            thread = threading.Thread(target=self._process_pdf, args=(event.dest_path,), daemon=True)
-            thread.start()
+        # Filtra SOLO file PDF (non directory)
+        if event.is_directory:
+            return
+        
+        # Filtra SOLO file .pdf (case-insensitive)
+        if not event.dest_path.lower().endswith(".pdf"):
+            return
+        
+        # Usa un thread separato per non bloccare il watchdog
+        thread = threading.Thread(target=self._process_pdf, args=(event.dest_path,), daemon=True)
+        thread.start()
     
     def on_modified(self, event):
-        """Gestisce l'evento di modifica file (per file che vengono scritti progressivamente)"""
-        if not event.is_directory and self._is_pdf_file(event.src_path):
-            # Evita di processare lo stesso file più volte
-            # Usa un thread separato per non bloccare il watchdog
-            thread = threading.Thread(target=self._process_pdf, args=(event.src_path,), daemon=True)
-            thread.start()
+        """IGNORA completamente gli eventi modified per evitare loop"""
+        # NON processare eventi modified - solo on_created e on_moved
+        # Questo previene loop quando il file viene modificato dopo la creazione
+        return
 
 def start_watcher_background(observer: Observer):
     """Avvia il watcher in background"""
@@ -516,6 +522,21 @@ async def get_data(request: Request, auth: bool = Depends(check_auth)):
         logger.error(f"Errore lettura dati: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Errore durante la lettura dei dati: {str(e)}")
 
+@app.get("/api/document-status/{file_hash}")
+async def get_document_status_endpoint(file_hash: str, request: Request, auth: bool = Depends(check_auth)):
+    """Endpoint per ottenere lo stato di un documento"""
+    try:
+        from app.processed_documents import get_document_status
+        status = get_document_status(file_hash)
+        return JSONResponse({
+            "success": True,
+            "file_hash": file_hash,
+            "status": status
+        })
+    except Exception as e:
+        logger.error(f"Errore lettura stato documento: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Errore durante la lettura dello stato: {str(e)}")
+
 @app.get("/api/watchdog-queue")
 async def get_watchdog_queue(request: Request, auth: bool = Depends(check_auth)):
     """Endpoint per ottenere gli elementi in coda dal watchdog - garantisce base64 per rete locale"""
@@ -572,13 +593,33 @@ async def get_watchdog_queue(request: Request, auth: bool = Depends(check_auth))
 
 @app.post("/api/watchdog-queue/{queue_id}/process")
 async def process_queue_item(queue_id: str, request: Request, auth: bool = Depends(check_auth)):
-    """Marca un elemento della coda come processato"""
+    """Marca un elemento della coda come processato e FINALIZZA il documento"""
     try:
-        from app.watchdog_queue import mark_as_processed, remove_item
-        mark_as_processed(queue_id)
+        from app.watchdog_queue import mark_as_processed, remove_item, get_item_by_id
+        from app.processed_documents import mark_document_finalized
+        
+        # Ottieni l'item dalla coda per recuperare l'hash
+        item = get_item_by_id(queue_id)
+        if not item:
+            raise HTTPException(status_code=404, detail=f"Elemento coda {queue_id} non trovato")
+        
+        doc_hash = item.get("file_hash")
+        if not doc_hash:
+            logger.warning(f"⚠️ Item {queue_id} senza file_hash, marco solo come processato")
+            mark_as_processed(queue_id)
+        else:
+            # Marca come processato nella coda
+            mark_as_processed(queue_id)
+            
+            # FINALIZZA il documento nel sistema di tracking
+            mark_document_finalized(doc_hash, queue_id)
+            logger.info(f"✅ Documento FINALIZED: queue_id={queue_id} hash={doc_hash[:16]}... file={item.get('file_name', 'N/A')}")
+        
         # Rimuovi dopo un po' per evitare accumulo
         remove_item(queue_id)
         return JSONResponse({"success": True})
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Errore processamento coda: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Errore durante il processamento: {str(e)}")

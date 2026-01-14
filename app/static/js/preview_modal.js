@@ -510,8 +510,17 @@ class PreviewModal {
                 throw new Error(result.detail || 'Errore durante il salvataggio');
             }
 
-            // Mostra messaggio di successo
+            // Mostra messaggio di successo nel modal
             this.showMessage('✅ DDT salvato con successo! Le correzioni sono state apprese dal sistema.', 'success');
+            
+            // Mostra toast notification se disponibile (UX migliorata)
+            if (typeof showToast === 'function') {
+                showToast({
+                    type: 'success',
+                    message: '✅ Documento salvato con successo',
+                    duration: 3000
+                });
+            }
             
             // Chiudi modal dopo 1.5 secondi e aggiorna la pagina
             setTimeout(() => {

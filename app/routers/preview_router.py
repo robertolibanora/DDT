@@ -326,6 +326,14 @@ async def save_preview(
         was_updated = update_or_append_to_excel(corrected_data)
         action = "aggiornato" if was_updated else "salvato"
         
+        # FINALIZZA il documento nel sistema di tracking
+        try:
+            from app.processed_documents import mark_document_finalized
+            mark_document_finalized(file_hash)
+            logger.info(f"✅ Documento FINALIZED dopo salvataggio Excel: hash={file_hash[:16]}... numero={corrected_data.get('numero_documento', 'N/A')}")
+        except Exception as e:
+            logger.warning(f"Errore finalizzazione documento: {e}")
+        
         # Se questo file viene dalla coda watchdog, marcalo come processato
         try:
             queue_items = get_all_items()

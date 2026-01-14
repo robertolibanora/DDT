@@ -8,11 +8,22 @@
 {% endblock %}
 
 {% block header_extra %}
-    <div class="last-update">
-        Ultimo aggiornamento: <span id="last-update">--</span>
-        <span class="refresh-indicator" id="refresh-indicator">
-            <span class="spinner"></span>
-        </span>
+    <div class="header-actions">
+        <div class="watchdog-indicator">
+            <span class="watchdog-badge hidden" id="watchdog-badge" 
+                  title="Clicca per aprire la coda documenti in attesa di elaborazione"
+                  role="button"
+                  tabindex="0">
+                <span class="badge-count">0</span>
+                <span class="badge-label">in attesa</span>
+            </span>
+        </div>
+        <div class="last-update">
+            Ultimo aggiornamento: <span id="last-update">--</span>
+            <span class="refresh-indicator" id="refresh-indicator">
+                <span class="spinner"></span>
+            </span>
+        </div>
     </div>
 {% endblock %}
 
@@ -128,6 +139,26 @@
             }
         }
 
+        // Stato precedente per diff-based rendering deterministico
+        let previousRowIds = new Set(); // Set di ID univoci delle righe esistenti
+        let previousRowsData = []; // Dati completi delle righe precedenti
+        let rowIdToElement = new Map(); // Mappa ID -> elemento DOM per aggiornamenti rapidi
+
+        /**
+         * Genera un ID univoco stabile per una riga basato su numero_documento + mittente + data
+         * Questo ID è deterministico e non cambia tra refresh
+         */
+        function getRowId(row) {
+            const num = (row.numero_documento || '').trim();
+            const mitt = (row.mittente || '').trim();
+            const data = (row.data || '').trim();
+            return `${num}|${mitt}|${data}`;
+        }
+
+        /**
+         * Rendering deterministico: aggiunge SOLO nuove righe, mantiene posizioni esistenti
+         * PRINCIPIO: Nessun documento deve riapparire una volta completato
+         */
         function renderTable(rows) {
             const tbody = document.getElementById("table-body");
             
@@ -139,28 +170,168 @@
                         </td>
                     </tr>
                 `;
+                previousRowIds.clear();
+                previousRowsData = [];
+                rowIdToElement.clear();
                 return;
             }
             
-            // I dati dal backend sono già ordinati dal più recente (ultimo in alto)
-            // Non serve invertire, manteniamo l'ordine originale
-            tbody.innerHTML = rows.map((row, index) => {
-                const kg = formatNumber(row.totale_kg);
-                // Evidenzia la prima riga (ultimo documento inserito)
-                const isNewest = index === 0;
-                const rowClass = isNewest ? 'newest-row' : '';
-                const numeroDoc = escapeHtml(row.numero_documento || '-');
-                const mittente = escapeHtml(row.mittente || '');
-                return `
-                    <tr class="${rowClass}">
-                        <td>${formatDate(row.data)}</td>
-                        <td>${mittente || '-'}</td>
-                        <td>${escapeHtml(row.destinatario || '-')}</td>
-                        <td>${numeroDoc}</td>
-                        <td>${kg}</td>
-                    </tr>
-                `;
-            }).join('');
+            // Genera ID per tutte le righe correnti
+            const currentRowIds = new Set(rows.map(getRowId));
+            
+            // Se stesso contenuto (stessi ID), non fare nulla (evita re-render inutile)
+            if (currentRowIds.size === previousRowIds.size && 
+                [...currentRowIds].every(id => previousRowIds.has(id))) {
+                return; // Nessun cambiamento, skip rendering
+            }
+            
+            // Prima renderizzazione: crea tutte le righe
+            if (previousRowIds.size === 0) {
+                tbody.innerHTML = rows.map((row, index) => {
+                    const rowId = getRowId(row);
+                    const isNewest = index === 0;
+                    const html = createTableRowHTML(row, isNewest, rowId);
+                    previousRowIds.add(rowId);
+                    return html;
+                }).join('');
+                
+                // Salva riferimento agli elementi DOM
+                rows.forEach((row, index) => {
+                    const rowId = getRowId(row);
+                    const tr = tbody.children[index];
+                    if (tr) {
+                        tr.dataset.rowId = rowId;
+                        rowIdToElement.set(rowId, tr);
+                    }
+                });
+                
+                previousRowsData = rows;
+                return;
+            }
+            
+            // Diff-based: trova SOLO nuove righe da aggiungere
+            const newRows = rows.filter(row => {
+                const rowId = getRowId(row);
+                return !previousRowIds.has(rowId);
+            });
+            
+            // Rimuovi righe che non esistono più (dovrebbe essere raro, ma gestiamolo)
+            const removedRowIds = [...previousRowIds].filter(id => !currentRowIds.has(id));
+            removedRowIds.forEach(rowId => {
+                const element = rowIdToElement.get(rowId);
+                if (element && element.parentNode) {
+                    element.remove();
+                }
+                rowIdToElement.delete(rowId);
+                previousRowIds.delete(rowId);
+            });
+            
+            // Aggiungi SOLO nuove righe in cima con fade-in discreto
+            if (newRows.length > 0) {
+                newRows.forEach((row, index) => {
+                    const rowId = getRowId(row);
+                    const isNewest = index === 0; // Solo la prima nuova riga è "newest"
+                    const rowElement = createTableRow(row, isNewest, rowId);
+                    
+                    // Inserisci in cima alla tabella
+                    if (tbody.firstChild) {
+                        tbody.insertBefore(rowElement, tbody.firstChild);
+                    } else {
+                        tbody.appendChild(rowElement);
+                    }
+                    
+                    // Salva riferimento
+                    rowIdToElement.set(rowId, rowElement);
+                    previousRowIds.add(rowId);
+                    
+                    // Animazione fade-in discreto (200-300ms come richiesto)
+                    requestAnimationFrame(() => {
+                        rowElement.style.opacity = '1';
+                        rowElement.style.transform = 'translateY(0)';
+                    });
+                });
+                
+                // Mostra toast notification per nuovo documento (solo se non è il primo caricamento)
+                if (previousRowsData.length > 0 && newRows.length > 0) {
+                    const newestRow = newRows[0];
+                    showToast({
+                        type: 'success',
+                        message: `✅ Documento salvato: ${newestRow.numero_documento || 'DDT'}`,
+                        duration: 3000
+                    });
+                }
+            }
+            
+            // Aggiorna stato precedente
+            previousRowsData = rows;
+        }
+
+        /**
+         * Crea elemento DOM per una nuova riga con animazione fade-in
+         */
+        function createTableRow(row, isNewest, rowId) {
+            const tr = document.createElement('tr');
+            tr.dataset.rowId = rowId; // Salva ID per riferimento futuro
+            tr.className = isNewest ? 'newest-row fade-in-row' : '';
+            tr.style.opacity = '0';
+            tr.style.transform = 'translateY(-10px)';
+            tr.style.transition = 'opacity 0.25s ease, transform 0.25s ease'; // 250ms per essere discreto
+            
+            const badges = getRowBadges(row, isNewest);
+            const kg = formatNumber(row.totale_kg);
+            const numeroDoc = escapeHtml(row.numero_documento || '-');
+            const mittente = escapeHtml(row.mittente || '');
+            
+            tr.innerHTML = `
+                <td>${formatDate(row.data)}</td>
+                <td>${mittente || '-'}</td>
+                <td>${escapeHtml(row.destinatario || '-')}</td>
+                <td>${numeroDoc}${badges}</td>
+                <td>${kg}</td>
+            `;
+            
+            return tr;
+        }
+
+        /**
+         * Crea HTML per una riga (prima renderizzazione)
+         */
+        function createTableRowHTML(row, isNewest, rowId) {
+            const badges = getRowBadges(row, isNewest);
+            const kg = formatNumber(row.totale_kg);
+            const numeroDoc = escapeHtml(row.numero_documento || '-');
+            const mittente = escapeHtml(row.mittente || '');
+            const rowClass = isNewest ? 'newest-row' : '';
+            
+            return `
+                <tr class="${rowClass}" data-row-id="${escapeHtml(rowId)}">
+                    <td>${formatDate(row.data)}</td>
+                    <td>${mittente || '-'}</td>
+                    <td>${escapeHtml(row.destinatario || '-')}</td>
+                    <td>${numeroDoc}${badges}</td>
+                    <td>${kg}</td>
+                </tr>
+            `;
+        }
+
+        /**
+         * Genera badge per una riga basato su stato e timestamp
+         * Badge "Nuovo" solo per documenti < 2h (fade-out automatico)
+         */
+        function getRowBadges(row, isNewest) {
+            let badges = '';
+            
+            // Badge "Nuovo" solo per la prima riga (più recente) e solo se < 2h
+            if (isNewest) {
+                // Nota: senza timestamp nel JSON, assumiamo che la prima riga sia sempre "nuova"
+                // In futuro si può aggiungere timestamp al JSON Excel
+                badges += '<span class="badge badge-new" title="Documento aggiunto di recente">Nuovo</span>';
+            }
+            
+            // Badge "Errore" se presente (in futuro si può aggiungere campo status al JSON)
+            // Per ora non disponibile senza file_hash nel JSON
+            
+            return badges;
         }
 
         function updateStats(rows) {
@@ -202,6 +373,7 @@
         }
 
         function escapeHtml(text) {
+            if (!text) return '';
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
@@ -263,11 +435,12 @@
             }
         });
 
-        // Controlla coda watchdog per nuovi PDF
+        // Controlla coda watchdog per nuovi PDF (UX migliorata)
         let lastProcessedQueueId = null;
+        let lastQueueCount = 0;
         
         async function checkWatchdogQueue() {
-            if (!isPageVisible || !window.previewModal) return;
+            if (!isPageVisible) return;
             
             // Non controllare se il modal è già aperto
             const modal = document.getElementById('preview-modal');
@@ -282,35 +455,228 @@
                 
                 if (response.ok) {
                     const data = await response.json();
-                    if (data.success && data.items && data.items.length > 0) {
-                        // Mostra anteprima solo per elementi nuovi (non già processati)
-                        const item = data.items.find(i => i.id !== lastProcessedQueueId) || data.items[0];
+                    const items = data.success && data.items ? data.items : [];
+                    const queueCount = items.length;
+                    
+                    // Aggiorna badge watchdog (solo se count > 0)
+                    // PRINCIPIO: Eventi ignorati (documento già FINALIZED) → SILENZIO totale
+                    updateWatchdogBadge(queueCount);
+                    
+                    // Se ci sono nuovi elementi, mostra toast notification discreta
+                    // PRINCIPIO: Nessun modal automatico, solo notifica non invasiva
+                    if (queueCount > 0 && queueCount > lastQueueCount) {
+                        const newItem = items.find(i => i.id !== lastProcessedQueueId) || items[0];
                         
-                        if (item && item.id !== lastProcessedQueueId) {
-                            lastProcessedQueueId = item.id;
+                        if (newItem && newItem.id !== lastProcessedQueueId) {
+                            lastProcessedQueueId = newItem.id;
                             
-                            window.previewModal.show(
-                                item.extracted_data,
-                                item.pdf_base64,
-                                item.file_hash,
-                                item.file_name
-                            );
-                            
-                            // Marca come processato dopo aver mostrato
-                            try {
-                                await fetch(`/api/watchdog-queue/${item.id}/process`, {
-                                    method: 'POST',
-                                    credentials: 'include'
-                                });
-                            } catch (e) {
-                                console.warn('Errore marcatura elemento processato:', e);
-                            }
+                            // Toast notification discreta con azione opzionale
+                            showToast({
+                                type: 'info',
+                                message: `📄 Nuovo documento rilevato: ${newItem.file_name || 'DDT'}`,
+                                action: 'Apri anteprima',
+                                actionCallback: () => {
+                                    if (window.previewModal) {
+                                        window.previewModal.show(
+                                            newItem.extracted_data,
+                                            newItem.pdf_base64,
+                                            newItem.file_hash,
+                                            newItem.file_name
+                                        );
+                                    }
+                                },
+                                duration: 8000
+                            });
                         }
                     }
+                    
+                    lastQueueCount = queueCount;
                 }
             } catch (error) {
                 console.error('Errore controllo coda watchdog:', error);
             }
+        }
+
+        /**
+         * Aggiorna badge watchdog con contatore documenti in attesa
+         * PRINCIPIO: Visibile solo se count > 0, click apre coda manualmente
+         */
+        function updateWatchdogBadge(count) {
+            const badge = document.getElementById('watchdog-badge');
+            const badgeCount = badge ? badge.querySelector('.badge-count') : null;
+            
+            if (!badge || !badgeCount) return;
+            
+            if (count > 0) {
+                badgeCount.textContent = count;
+                badge.classList.remove('hidden');
+                
+                // Aggiungi event listener per click (solo una volta)
+                if (!badge.dataset.listenerAdded) {
+                    badge.addEventListener('click', openWatchdogQueue);
+                    badge.addEventListener('keypress', (e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            openWatchdogQueue();
+                        }
+                    });
+                    badge.dataset.listenerAdded = 'true';
+                }
+            } else {
+                badge.classList.add('hidden');
+            }
+        }
+
+        /**
+         * Apre la coda watchdog manualmente quando l'utente clicca sul badge
+         * PRINCIPIO: Nessun modal automatico, solo su richiesta utente
+         */
+        async function openWatchdogQueue() {
+            if (!window.previewModal) {
+                showToast({
+                    type: 'warning',
+                    message: 'Sistema di anteprima non disponibile',
+                    duration: 3000
+                });
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/watchdog-queue', {
+                    credentials: 'include'
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Errore caricamento coda');
+                }
+                
+                const data = await response.json();
+                const items = data.success && data.items ? data.items : [];
+                
+                if (items.length === 0) {
+                    showToast({
+                        type: 'info',
+                        message: 'Nessun documento in attesa',
+                        duration: 3000
+                    });
+                    return;
+                }
+                
+                // Mostra il primo documento della coda
+                const item = items[0];
+                window.previewModal.show(
+                    item.extracted_data,
+                    item.pdf_base64,
+                    item.file_hash,
+                    item.file_name
+                );
+                
+            } catch (error) {
+                console.error('Errore apertura coda watchdog:', error);
+                showToast({
+                    type: 'error',
+                    message: 'Errore durante il caricamento della coda',
+                    duration: 5000
+                });
+            }
+        }
+
+        /**
+         * Toast notification system non invasivo
+         * PRINCIPIO: Feedback chiaro ma NON invasivo, auto-dismiss 5-8s
+         * Posizione: top-right, tipi: info, success, warning, error
+         */
+        function showToast(options) {
+            const { type = 'info', message, action, actionCallback, duration = 5000 } = options;
+            
+            // Crea container toast se non esiste
+            let toastContainer = document.getElementById('toast-container');
+            if (!toastContainer) {
+                toastContainer = document.createElement('div');
+                toastContainer.id = 'toast-container';
+                toastContainer.className = 'toast-container';
+                document.body.appendChild(toastContainer);
+            }
+            
+            // Crea toast element
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.setAttribute('role', 'alert');
+            toast.setAttribute('aria-live', 'polite');
+            
+            // Icone per tipo (microcopy migliorata)
+            const icons = {
+                'info': '📄',
+                'success': '✅',
+                'warning': '⚠️',
+                'error': '❌'
+            };
+            
+            const icon = icons[type] || '📄';
+            
+            toast.innerHTML = `
+                <div class="toast-content">
+                    <span class="toast-icon">${icon}</span>
+                    <span class="toast-message">${escapeHtml(message)}</span>
+                    ${action && actionCallback ? `<button class="toast-action" type="button">${escapeHtml(action)}</button>` : ''}
+                </div>
+                <button class="toast-close" type="button" aria-label="Chiudi notifica">×</button>
+            `;
+            
+            // Event listener per chiusura
+            const closeBtn = toast.querySelector('.toast-close');
+            if (closeBtn) {
+                closeBtn.addEventListener('click', () => {
+                    toast.classList.remove('toast-show');
+                    setTimeout(() => toast.remove(), 300);
+                });
+            }
+            
+            // Event listener per azione
+            if (action && actionCallback) {
+                const actionBtn = toast.querySelector('.toast-action');
+                if (actionBtn) {
+                    actionBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        actionCallback();
+                        toast.classList.remove('toast-show');
+                        setTimeout(() => toast.remove(), 300);
+                    });
+                }
+            }
+            
+            toastContainer.appendChild(toast);
+            
+            // Animazione fade-in discreta
+            requestAnimationFrame(() => {
+                toast.classList.add('toast-show');
+            });
+            
+            // Auto-remove dopo duration (5-8s come richiesto)
+            const autoRemoveTimeout = setTimeout(() => {
+                toast.classList.remove('toast-show');
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        toast.remove();
+                    }
+                }, 300);
+            }, duration);
+            
+            // Pausa auto-remove su hover (UX migliorata)
+            toast.addEventListener('mouseenter', () => {
+                clearTimeout(autoRemoveTimeout);
+            });
+            
+            toast.addEventListener('mouseleave', () => {
+                setTimeout(() => {
+                    toast.classList.remove('toast-show');
+                    setTimeout(() => {
+                        if (toast.parentNode) {
+                            toast.remove();
+                        }
+                    }, 300);
+                }, duration);
+            });
         }
 
         // Avvia il refresh automatico ogni 3 secondi (solo se la pagina è visibile)

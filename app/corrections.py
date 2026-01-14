@@ -99,22 +99,28 @@ def _save_corrections(corrections: Dict[str, Any]) -> None:
 
 def get_file_hash(file_path: str) -> str:
     """
-    Calcola l'hash MD5 di un file per identificarlo univocamente
+    Calcola l'hash SHA256 di un file per identificarlo univocamente
     
     Args:
         file_path: Percorso del file
         
     Returns:
-        Hash MD5 del file
+        Hash SHA256 del file
     """
     try:
-        with open(file_path, 'rb') as f:
-            file_hash = hashlib.md5(f.read()).hexdigest()
-        return file_hash
-    except Exception as e:
-        logger.warning(f"Errore calcolo hash file {file_path}: {e}")
-        # Fallback: usa il nome del file
-        return hashlib.md5(file_path.encode()).hexdigest()
+        # Usa il sistema centralizzato di hash se disponibile
+        from app.processed_documents import calculate_file_hash
+        return calculate_file_hash(file_path)
+    except ImportError:
+        # Fallback: calcola direttamente
+        try:
+            with open(file_path, 'rb') as f:
+                file_hash = hashlib.sha256(f.read()).hexdigest()
+            return file_hash
+        except Exception as e:
+            logger.warning(f"Errore calcolo hash SHA256 file {file_path}: {e}")
+            # Fallback: usa il nome del file
+            return hashlib.sha256(file_path.encode()).hexdigest()
 
 
 def _create_auto_rule_from_pattern(pattern_data: Dict[str, Any], corrected_data: Dict[str, Any]) -> Optional[str]:
@@ -234,7 +240,7 @@ def save_correction(file_path: str, original_data: Dict[str, Any], corrected_dat
     """
     corrections_data = _load_corrections()
     
-    file_hash = get_file_hash(file_path) if os.path.exists(file_path) else hashlib.md5(file_path.encode()).hexdigest()
+    file_hash = get_file_hash(file_path) if os.path.exists(file_path) else hashlib.sha256(file_path.encode()).hexdigest()
     file_name = os.path.basename(file_path)
     
     correction_id = f"{file_hash}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
