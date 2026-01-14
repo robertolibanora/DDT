@@ -93,11 +93,14 @@ def add_to_queue(file_path: str, extracted_data: Dict[str, Any], pdf_base64: str
 
 def get_pending_items() -> List[Dict[str, Any]]:
     """
-    Ottiene tutti gli elementi in coda non ancora processati
-    Filtra anche i documenti già FINALIZED per evitare conteggi errati
+    Ottiene tutti gli elementi in coda non ancora processati.
+    
+    REGOLE DASHBOARD:
+    - Mostra SOLO: READY_FOR_REVIEW e STUCK (stati funzionali visibili all'utente)
+    - Esclude: PROCESSING (tecnico, invisibile), FINALIZED, ERROR_FINAL (terminali)
     
     Returns:
-        Lista di elementi in coda non processati e non finalizzati
+        Lista di elementi in coda con stato READY_FOR_REVIEW o STUCK
     """
     with _queue_lock:
         _load_queue()
@@ -109,14 +112,29 @@ def get_pending_items() -> List[Dict[str, Any]]:
             if item.get("processed", False):
                 continue
             
-            # Escludi documenti già FINALIZED o ERROR_FINAL
+            # Filtra per stato funzionale: READY_FOR_REVIEW e STUCK
             file_hash = item.get("file_hash")
             if file_hash:
                 status = get_document_status(file_hash)
+                
+                # Escludi documenti già FINALIZED o ERROR_FINAL
                 if status in (DocumentStatus.FINALIZED.value, DocumentStatus.ERROR_FINAL.value):
                     # Marca come processato se è già finalizzato
                     item["processed"] = True
                     _save_queue()
+                    continue
+                
+                # Escludi PROCESSING (stato tecnico invisibile all'utente)
+                if status == DocumentStatus.PROCESSING.value:
+                    continue
+                
+                # Include READY_FOR_REVIEW e STUCK (stati funzionali visibili)
+                # Backward compatibility: include anche READY (deprecato)
+                if status not in (
+                    DocumentStatus.READY_FOR_REVIEW.value, 
+                    DocumentStatus.STUCK.value,
+                    DocumentStatus.READY.value  # Backward compatibility
+                ):
                     continue
             
             pending_items.append(item)

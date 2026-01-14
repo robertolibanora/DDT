@@ -104,6 +104,219 @@ def extract_text_from_pdf(file_path: str) -> str:
     return extract_text_for_rule_detection(file_path)
 
 
+def extract_missing_fields_with_ai(
+    file_path: str,
+    missing_fields: list[str],
+    already_extracted: dict,
+    pdf_bytes: bytes,
+    pdf_text: Optional[str] = None,
+    text_extraction_result: Optional[Any] = None
+) -> dict:
+    """
+    Usa AI_FALLBACK per estrarre SOLO i campi mancanti,
+    usando already_extracted come contesto vincolante.
+    
+    REGOLE FERREE:
+    - L'AI NON può modificare campi già estratti dal layout
+    - Prompt esplicito: "estrai SOLO questi campi"
+    - Se AI fallisce → solleva ValueError
+    
+    Args:
+        file_path: Percorso del file PDF
+        missing_fields: Lista di campi da estrarre (es: ['destinatario'])
+        already_extracted: Dizionario con campi già estratti dal layout model
+        pdf_bytes: Contenuto del PDF in bytes
+        pdf_text: Testo estratto dal PDF (opzionale, per grounding)
+        text_extraction_result: Risultato estrazione testo (opzionale)
+        
+    Returns:
+        Dizionario con SOLO i campi mancanti estratti
+        
+    Raises:
+        ValueError: Se l'estrazione AI fallisce o non completa i campi mancanti
+    """
+    logger.info(f"🤖 AI fallback mirato per campi mancanti: {missing_fields}")
+    logger.info(f"   Campi già estratti dal layout (NON modificabili): {list(already_extracted.keys())}")
+    
+    # Costruisci prompt specifico per campi mancanti
+    field_descriptions = {
+        'data': 'Data del documento DDT (formato YYYY-MM-DD)',
+        'mittente': 'Azienda che emette il DDT (chi spedisce)',
+        'destinatario': 'Azienda che riceve la merce',
+        'numero_documento': 'Numero del DDT',
+        'totale_kg': 'Peso totale in chilogrammi (solo numero, float)'
+    }
+    
+    missing_fields_desc = "\n".join([
+        f"- **{field}**: {field_descriptions.get(field, field)}"
+        for field in missing_fields
+    ])
+    
+    # Costruisci contesto con campi già estratti (per riferimento ma NON modificabili)
+    context_fields = "\n".join([
+        f"- **{field}**: {already_extracted.get(field, 'N/A')}"
+        for field in already_extracted.keys()
+    ])
+    
+    targeted_prompt = f"""Sei un esperto estrattore di dati da Documenti di Trasporto (DDT) italiani.
+
+⚠️ IMPORTANTE - REGOLE FERREE:
+1. Estrai SOLO i seguenti campi mancanti (NON modificare gli altri):
+{missing_fields_desc}
+
+2. Campi già estratti dal layout model (NON modificare questi):
+{context_fields}
+
+3. Restituisci UNICAMENTE un JSON con SOLO i campi mancanti richiesti.
+4. NON includere campi già estratti nel JSON di risposta.
+5. Se un campo mancante non è trovabile, usa fallback appropriati:
+   - data: "1900-01-01"
+   - mittente/destinatario/numero_documento: "Non specificato"
+   - totale_kg: 0.0
+
+CAMPI DA ESTRARRE (SOLO QUESTI):
+{missing_fields_desc}
+
+IMPORTANTE: Restituisci SOLO il JSON con i campi mancanti, senza commenti."""
+    
+    # Aggiungi grounding del testo se disponibile
+    if pdf_text and text_extraction_result and text_extraction_result.is_reliable:
+        text_preview = pdf_text[:2000] if len(pdf_text) > 2000 else pdf_text
+        if len(pdf_text) > 2000:
+            text_preview += "\n... (testo troncato)"
+        
+        targeted_prompt += f"""
+
+---
+📄 TESTO ESTRATTO AUTOMATICAMENTE DAL PDF (RIFERIMENTO):
+<<<
+{text_preview}
+>>>
+
+⚠️ IMPORTANTE:
+- Usa questo testo come riferimento per trovare i campi mancanti
+- Privilegia sempre la validazione visiva del documento
+"""
+    
+    # Converti PDF in immagine (riusa logica esistente)
+    img_b64 = None
+    image_format = "image/png"
+    
+    try:
+        import fitz
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        if len(doc) == 0:
+            raise ValueError("PDF vuoto o non valido")
+        
+        page = doc[0]
+        zoom = 200 / 72.0
+        mat = fitz.Matrix(zoom, zoom)
+        pix = page.get_pixmap(matrix=mat)
+        img_bytes = pix.tobytes("png")
+        img_b64 = base64.b64encode(img_bytes).decode()
+        doc.close()
+    except ImportError:
+        try:
+            from pdf2image import convert_from_bytes
+            from io import BytesIO
+            images = convert_from_bytes(pdf_bytes, first_page=1, last_page=1, dpi=200)
+            if not images:
+                raise ValueError("Impossibile convertire il PDF in immagine")
+            img_buffer = BytesIO()
+            images[0].save(img_buffer, format='PNG')
+            img_bytes = img_buffer.getvalue()
+            img_b64 = base64.b64encode(img_bytes).decode()
+        except ImportError:
+            raise ImportError("Nessuna libreria disponibile per convertire PDF")
+    except Exception as e:
+        raise ValueError(f"Errore conversione PDF: {e}") from e
+    
+    if not img_b64:
+        raise ValueError("Impossibile convertire il PDF in immagine")
+    
+    # Chiama OpenAI Vision
+    try:
+        response: ChatCompletion = client.chat.completions.create(
+            model=MODEL,
+            messages=[
+                {"role": "system", "content": targeted_prompt},
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"Estrai SOLO i seguenti campi mancanti dal DDT: {', '.join(missing_fields)}. "
+                                f"Non modificare i campi già estratti: {', '.join(already_extracted.keys())}."
+                            )
+                        },
+                        {"type": "image_url", "image_url": {"url": f"data:{image_format};base64,{img_b64}"}}
+                    ],
+                },
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.1,
+        )
+    except OpenAIError as e:
+        logger.error(f"Errore API OpenAI durante fallback mirato: {e}")
+        raise ValueError(f"Errore durante estrazione AI campi mancanti: {str(e)}") from e
+    
+    # Estrai il JSON dalla risposta
+    if not response.choices or not response.choices[0].message.content:
+        raise ValueError("Risposta vuota da OpenAI durante fallback mirato")
+    
+    import json
+    try:
+        ai_raw_data = json.loads(response.choices[0].message.content)
+    except json.JSONDecodeError as e:
+        logger.error(f"Errore parsing JSON da OpenAI durante fallback mirato: {e}")
+        raise ValueError(f"Risposta non valida da OpenAI: {str(e)}") from e
+    
+    logger.info(f"🤖 Dati grezzi estratti da AI (solo campi mancanti): {ai_raw_data}")
+    
+    # Normalizza solo i campi mancanti
+    ai_normalized = {}
+    for field in missing_fields:
+        if field in ai_raw_data:
+            ai_normalized[field] = ai_raw_data[field]
+        else:
+            # Campo non estratto da AI → usa fallback
+            logger.warning(f"⚠️ Campo '{field}' non estratto da AI, uso fallback")
+            if field == 'data':
+                ai_normalized[field] = "1900-01-01"
+            elif field in ['mittente', 'destinatario', 'numero_documento']:
+                ai_normalized[field] = "Non specificato"
+            elif field == 'totale_kg':
+                ai_normalized[field] = 0.0
+    
+    # Normalizza usando le funzioni esistenti
+    if 'data' in ai_normalized:
+        ai_normalized['data'] = normalize_date(str(ai_normalized['data'])) or "1900-01-01"
+    if 'mittente' in ai_normalized:
+        ai_normalized['mittente'] = clean_company_name(str(ai_normalized['mittente'])) or "Non specificato"
+    if 'destinatario' in ai_normalized:
+        ai_normalized['destinatario'] = clean_company_name(str(ai_normalized['destinatario'])) or "Non specificato"
+    if 'numero_documento' in ai_normalized:
+        ai_normalized['numero_documento'] = normalize_text(str(ai_normalized['numero_documento'])) or "Non specificato"
+    if 'totale_kg' in ai_normalized:
+        ai_normalized['totale_kg'] = normalize_float(ai_normalized['totale_kg']) or 0.0
+    
+    # Verifica che tutti i campi mancanti siano stati estratti
+    extracted_missing = list(ai_normalized.keys())
+    still_missing = [f for f in missing_fields if f not in extracted_missing]
+    
+    if still_missing:
+        error_msg = (
+            f"AI fallback non ha completato tutti i campi mancanti. "
+            f"Estratti: {extracted_missing}, Ancora mancanti: {still_missing}"
+        )
+        logger.error(f"❌ {error_msg}")
+        raise ValueError(error_msg)
+    
+    logger.info(f"✅ AI fallback completato per campi: {extracted_missing}")
+    return ai_normalized
+
+
 def build_dynamic_prompt(rule_name: Optional[str] = None, extracted_text: Optional[str] = None, annotations: Optional[Dict[str, Any]] = None) -> str:
     """
     Costruisce il prompt dinamico con eventuali regole aggiuntive e grounding del testo
@@ -305,27 +518,94 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
                     # Valida usando Pydantic
                     ddt_data = DDTData(**normalized_data)
                     result = ddt_data.model_dump()
+                    # Aggiungi extraction_mode al risultato per audit trail
+                    result["_extraction_mode"] = extraction_mode
                     logger.info(f"✅ Dati validati con successo (estrazione box)")
                     logger.info(f"📊 Extraction mode used: {extraction_mode}")
                     logger.info(f"📐 LAYOUT MODEL APPLIED: '{layout_rule_name}' - Estrazione completata senza AI")
                     return result
                 except ValidationError as e:
-                    # FIX #4: Distingui campi mancanti vs invalidi
+                    # NUOVA STRATEGIA: Partial Layout Extraction con fallback AI mirato
                     error_fields = [err.get("loc", [])[0] for err in e.errors() if err.get("loc")]
                     missing_fields = [f for f in error_fields if f not in box_extracted_data]
                     invalid_fields = [f for f in error_fields if f in box_extracted_data]
                     
+                    # REGOLA FERREA: Se almeno 1 campo estratto → fallback parziale consentito
+                    extracted_count = len(box_extracted_data)
+                    total_required_fields = len(layout_rule.fields)
+                    
                     if missing_fields:
-                        # Campi mancanti → errore esplicito, NO fallback AI
-                        error_msg = (
-                            f"Layout model '{layout_rule_name}' estratto ma campi mancanti: {missing_fields}. "
-                            f"Campi estratti: {list(box_extracted_data.keys())}. "
-                            f"Verifica che tutti i campi siano definiti nel layout model."
-                        )
-                        logger.error(f"❌ {error_msg}")
-                        logger.error(f"   Campi mancanti: {missing_fields}")
-                        logger.error(f"   Campi estratti: {list(box_extracted_data.keys())}")
-                        raise ValueError(error_msg)
+                        # Campi mancanti → fallback AI mirato SOLO se almeno 1 campo estratto
+                        if extracted_count == 0:
+                            # Layout estrae 0 campi → AI_FALLBACK classico
+                            logger.warning(f"⚠️ Layout model '{layout_rule_name}' estratto 0 campi → fallback AI classico")
+                            extraction_mode = "AI_FALLBACK"
+                            # Continua con AI extraction completa (non siamo qui, ma per sicurezza)
+                            # NOTA: Questo caso non dovrebbe mai verificarsi perché già gestito sopra (riga 278)
+                            raise ValueError(
+                                f"Layout model '{layout_rule_name}' estratto 0 campi. "
+                                f"Verifica che i box siano corretti nel layout model."
+                            )
+                        
+                        # Estrazione parziale: almeno 1 campo estratto → fallback AI mirato
+                        logger.info(f"📐 Layout model '{layout_rule_name}' estrazione parziale: {extracted_count}/{total_required_fields} campi")
+                        logger.warning(f"⚠️ Campi mancanti dal layout model: {missing_fields} → fallback AI mirato")
+                        
+                        # Prepara dati per fallback AI (serve pdf_bytes e pdf_text)
+                        # NOTA: pdf_bytes e pdf_text sono già disponibili nel contesto della funzione extract_from_pdf
+                        # Li passeremo alla funzione extract_missing_fields_with_ai
+                        
+                        # Estrai campi mancanti con AI
+                        try:
+                            ai_missing_data = extract_missing_fields_with_ai(
+                                file_path=file_path,
+                                missing_fields=missing_fields,
+                                already_extracted=box_extracted_data,
+                                pdf_bytes=pdf_bytes,
+                                pdf_text=pdf_text,
+                                text_extraction_result=text_extraction_result
+                            )
+                            
+                            # Unisci risultati: layout (priorità) + AI (solo mancanti)
+                            # REGOLA FERREA: Layout ha priorità, AI NON sovrascrive campi layout
+                            hybrid_data = {**box_extracted_data, **ai_missing_data}
+                            
+                            logger.info(f"🤖 AI fallback completato per campi: {list(ai_missing_data.keys())}")
+                            
+                            # Applica suggerimenti di apprendimento automatico al risultato ibrido
+                            try:
+                                hybrid_data = apply_learning_suggestions(hybrid_data)
+                                logger.info("Suggerimenti di apprendimento applicati (risultato ibrido)")
+                            except Exception as e:
+                                logger.warning(f"Errore applicazione suggerimenti apprendimento: {e}")
+                            
+                            # Valida il risultato finale completo
+                            ddt_data = DDTData(**hybrid_data)
+                            result = ddt_data.model_dump()
+                            
+                            extraction_mode = "HYBRID_LAYOUT_AI"
+                            # Aggiungi extraction_mode al risultato per audit trail
+                            result["_extraction_mode"] = extraction_mode
+                            logger.info(f"✅ Documento completato con strategia HYBRID_LAYOUT_AI")
+                            logger.info(f"📊 Extraction mode used: {extraction_mode}")
+                            logger.info(f"📐 Layout model '{layout_rule_name}': {extracted_count} campi + AI: {len(ai_missing_data)} campi")
+                            return result
+                            
+                        except ValueError as ai_error:
+                            # AI fallback fallito → ERROR_FINAL
+                            error_msg = (
+                                f"Layout model '{layout_rule_name}' estratto {extracted_count}/{total_required_fields} campi, "
+                                f"ma AI fallback per campi mancanti {missing_fields} è fallito: {ai_error}"
+                            )
+                            logger.error(f"❌ {error_msg}")
+                            raise ValueError(error_msg) from ai_error
+                        except Exception as ai_error:
+                            # Errore generico durante AI fallback
+                            error_msg = (
+                                f"Errore durante AI fallback per campi mancanti {missing_fields}: {ai_error}"
+                            )
+                            logger.error(f"❌ {error_msg}", exc_info=True)
+                            raise ValueError(error_msg) from ai_error
                     else:
                         # Campi presenti ma invalidi → fallback AI solo per correzione
                         logger.warning(f"⚠️ Campi invalidi dopo box extraction: {invalid_fields}")
@@ -558,15 +838,14 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
         # Normalizza i dati prima della validazione
         normalized_data = _normalize_extracted_data(raw_data)
         
-        # HARD FAILOVER: Se extraction_mode è LAYOUT_MODEL, NON dovremmo essere qui
+        # HARD FAILOVER: Se extraction_mode è LAYOUT_MODEL o HYBRID_LAYOUT_AI, NON dovremmo essere qui
         # Se siamo qui, significa che extraction_mode è AI_FALLBACK
-        # (Questo check non dovrebbe mai essere raggiunto dopo FIX #1, ma lo manteniamo come safety check)
-        if extraction_mode == "LAYOUT_MODEL":
+        # (Questo check non dovrebbe mai essere raggiunto dopo le modifiche, ma lo manteniamo come safety check)
+        if extraction_mode in ("LAYOUT_MODEL", "HYBRID_LAYOUT_AI"):
             layout_rule_name_safe = layout_rule_name if 'layout_rule_name' in locals() else 'UNKNOWN'
             error_msg = (
-                f"❌ CRITICAL BUG: extraction_mode è LAYOUT_MODEL ma siamo nella sezione AI extraction! "
-                f"Questo indica un bug nel codice - la guard clause (riga 341) non ha funzionato. "
-                f"Layout model '{layout_rule_name_safe}' dovrebbe aver già restituito."
+                f"❌ CRITICAL BUG: extraction_mode è {extraction_mode} ma siamo nella sezione AI extraction! "
+                f"Questo indica un bug nel codice - la sezione layout model dovrebbe aver già restituito."
             )
             logger.error(error_msg)
             logger.error(f"   Stack trace completo necessario per debug")
@@ -609,6 +888,8 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
         try:
             ddt_data = DDTData(**normalized_data)
             result = ddt_data.model_dump()
+            # Aggiungi extraction_mode al risultato per audit trail
+            result["_extraction_mode"] = extraction_mode
             logger.info(f"✅ Dati validati con successo")
             logger.info(f"📊 Extraction mode used: {extraction_mode}")
             return result

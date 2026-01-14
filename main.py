@@ -130,14 +130,24 @@ class DDTHandler(FileSystemEventHandler):
                     logger.info(f"⏭️ Documento in ERROR_FINAL (hash={doc_hash[:16]}...), ignoro evento watchdog - {Path(file_path).name}")
                 elif reason == "already_processing":
                     logger.info(f"⏭️ Documento già in PROCESSING (hash={doc_hash[:16]}...), ignoro evento watchdog - {Path(file_path).name}")
-                elif reason == "already_ready":
-                    logger.debug(f"⏭️ Documento già READY (hash={doc_hash[:16]}...), ignoro evento watchdog - {Path(file_path).name}")
+                elif reason == "already_ready" or reason == "already_ready_for_review":
+                    logger.debug(f"⏭️ Documento già READY_FOR_REVIEW (hash={doc_hash[:16]}...), ignoro evento watchdog - {Path(file_path).name}")
                 else:
                     logger.info(f"⏭️ Documento non processabile: {reason} (hash={doc_hash[:16]}...) - {Path(file_path).name}")
                 return
             
-            # Registra come PROCESSING
-            register_document(file_path, doc_hash, DocumentStatus.PROCESSING)
+            # REGOLA FERREA: Usa transition_document_state invece di register_document
+            from app.processed_documents import transition_document_state
+            transition_document_state(
+                doc_hash=doc_hash,
+                from_state=None,
+                to_state=DocumentStatus.PROCESSING,
+                reason="Watchdog rilevato nuovo PDF - avvio processing",
+                metadata={
+                    "file_path": file_path,
+                    "file_name": Path(file_path).name
+                }
+            )
             
             logger.info(f"📄 Nuovo DDT rilevato: hash={doc_hash[:16]}... file={Path(file_path).name}")
             
@@ -157,6 +167,7 @@ class DDTHandler(FileSystemEventHandler):
             
             # Estrai i dati (ma NON salvare ancora)
             data = extract_from_pdf(file_path)
+            extraction_mode = data.pop("_extraction_mode", None)  # Estrai extraction_mode dal risultato
             
             # Verifica se questo numero documento è già in Excel (controllo finale)
             try:
@@ -192,11 +203,11 @@ class DDTHandler(FileSystemEventHandler):
             queue_id = add_to_queue(file_path, data, pdf_base64, doc_hash)
             logger.info(f"📋 DDT aggiunto alla coda per anteprima: queue_id={queue_id} hash={doc_hash[:16]}... numero={data.get('numero_documento', 'N/A')}")
             
-            # Marca come READY quando tutto è pronto (dati estratti + PNG + coda)
-            # Questo permette alla dashboard di distinguere PROCESSING reali da READY
+            # Marca come READY_FOR_REVIEW quando tutto è pronto (dati estratti + PNG + coda)
+            # Questo permette alla dashboard di distinguere PROCESSING (tecnico) da READY_FOR_REVIEW (funzionale)
             from app.processed_documents import mark_document_ready
-            mark_document_ready(doc_hash, queue_id)
-            logger.info(f"✅ Documento READY per anteprima: hash={doc_hash[:16]}... numero={data.get('numero_documento', 'N/A')}")
+            mark_document_ready(doc_hash, queue_id, extraction_mode)
+            logger.info(f"✅ Documento READY_FOR_REVIEW per anteprima: hash={doc_hash[:16]}... numero={data.get('numero_documento', 'N/A')} extraction_mode={extraction_mode or 'N/A'}")
             
         except ValueError as e:
             logger.error(f"❌ Errore validazione DDT: {e}")
@@ -264,6 +275,15 @@ async def lifespan(app: FastAPI):
     inbox_path = get_inbox_dir()
     logger.info(f"📁 Cartella inbox verificata: {inbox_path}")
     
+    # Migra documenti READY (deprecato) a READY_FOR_REVIEW per backward compatibility
+    try:
+        from app.processed_documents import migrate_ready_to_ready_for_review
+        migrated_count = migrate_ready_to_ready_for_review()
+        if migrated_count > 0:
+            logger.info(f"🔄 Migrazione stati completata: {migrated_count} documento(i) migrato(i)")
+    except Exception as e:
+        logger.warning(f"⚠️ Errore migrazione stati: {e}")
+    
     # Carica layout models all'avvio per loggare disponibilità
     try:
         from app.layout_rules.manager import load_layout_rules
@@ -294,6 +314,35 @@ async def lifespan(app: FastAPI):
         logger.info(f"👀 Watchdog configurato per monitorare: {inbox_path}")
     except Exception as e:
         logger.error(f"❌ Errore nella configurazione del watchdog: {e}", exc_info=True)
+    
+    # Startup - avvia cleanup periodico per documenti STUCK
+    def stuck_cleanup_loop():
+        """Loop periodico per controllare e marcare documenti PROCESSING bloccati come STUCK"""
+        import time
+        from app.processed_documents import check_and_mark_stuck_documents
+        # Esegui cleanup ogni 5 minuti
+        cleanup_interval = 300  # 5 minuti
+        while True:
+            try:
+                time.sleep(cleanup_interval)
+                stuck_count = check_and_mark_stuck_documents()
+                if stuck_count > 0:
+                    logger.info(f"🔍 Cleanup STUCK: {stuck_count} documento(i) marcato(i) come STUCK")
+            except Exception as e:
+                logger.error(f"❌ Errore nel cleanup STUCK: {e}", exc_info=True)
+    
+    cleanup_thread = threading.Thread(target=stuck_cleanup_loop, daemon=True)
+    cleanup_thread.start()
+    logger.info("🔍 Cleanup periodico STUCK avviato (controllo ogni 5 minuti)")
+    
+    # Esegui un controllo iniziale all'avvio
+    try:
+        from app.processed_documents import check_and_mark_stuck_documents
+        initial_stuck = check_and_mark_stuck_documents()
+        if initial_stuck > 0:
+            logger.info(f"🔍 Controllo iniziale STUCK: {initial_stuck} documento(i) già bloccato(i)")
+    except Exception as e:
+        logger.warning(f"⚠️ Errore controllo iniziale STUCK: {e}")
     
     yield
     
@@ -416,73 +465,174 @@ async def upload_ddt(request: Request, file: UploadFile = File(...), auth: bool 
                 raise HTTPException(status_code=400, detail="Il file è vuoto")
             tmp_file.write(content)
         
-        logger.info(f"Upload file: {file.filename} ({len(content)} bytes)")
+        logger.info(f"📤 Upload manuale file: {file.filename} ({len(content)} bytes)")
         
-        # Processa il file - estrai dati
+        # REGOLA FERREA: Upload manuale usa lo stesso flusso del watchdog
+        # 1. Calcola hash PRIMA di qualsiasi operazione
+        from app.processed_documents import (
+            calculate_file_hash,
+            should_process_document,
+            register_document,
+            mark_document_error,
+            mark_document_ready,
+            DocumentStatus,
+            is_document_finalized,
+            transition_document_state
+        )
+        
+        # Calcola hash dal file temporaneo
+        file_hash = calculate_file_hash(tmp_path)
+        
+        # Verifica se documento già finalizzato
+        if is_document_finalized(file_hash):
+            logger.info(f"⏭️ Documento già FINALIZED (hash={file_hash[:16]}...), ignoro upload - {file.filename}")
+            raise HTTPException(status_code=400, detail="Documento già finalizzato")
+        
+        # Verifica se documento dovrebbe essere processato
+        should_process, reason = should_process_document(file_hash)
+        if not should_process:
+            if reason == "already_finalized":
+                logger.info(f"⏭️ Documento già FINALIZED (hash={file_hash[:16]}...), ignoro upload - {file.filename}")
+                raise HTTPException(status_code=400, detail="Documento già finalizzato")
+            elif reason == "error_final":
+                logger.info(f"⏭️ Documento in ERROR_FINAL (hash={file_hash[:16]}...), ignoro upload - {file.filename}")
+                raise HTTPException(status_code=400, detail="Documento in errore definitivo")
+            elif reason == "already_processing":
+                logger.info(f"⏭️ Documento già in PROCESSING (hash={file_hash[:16]}...), ignoro upload - {file.filename}")
+                raise HTTPException(status_code=400, detail="Documento già in elaborazione")
+            elif reason == "already_ready" or reason == "already_ready_for_review":
+                logger.info(f"⏭️ Documento già READY_FOR_REVIEW (hash={file_hash[:16]}...), ignoro upload - {file.filename}")
+                raise HTTPException(status_code=400, detail="Documento già pronto per revisione")
+            else:
+                logger.info(f"⏭️ Documento non processabile: {reason} (hash={file_hash[:16]}...) - {file.filename}")
+                raise HTTPException(status_code=400, detail=f"Documento non processabile: {reason}")
+        
+        # Salva una copia nella cartella inbox PRIMA dell'estrazione
+        from app.paths import get_inbox_dir, safe_copy
+        inbox_path = get_inbox_dir()
+        
+        # Genera un nome file basato sul numero documento e mittente per facilitare la ricerca
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_filename = f"UPLOAD_{timestamp}_{file.filename}"
+        safe_filename = "".join(c for c in safe_filename if c.isalnum() or c in "._- ")
+        safe_filename = safe_filename.replace(" ", "_")
+        
+        inbox_saved_path = inbox_path / safe_filename
+        
+        # Se il file esiste già, aggiungi un contatore
+        counter = 1
+        original_inbox_path = inbox_saved_path
+        while inbox_saved_path.exists():
+            name_part = original_inbox_path.stem
+            inbox_saved_path = inbox_path / f"{name_part}_{counter}.pdf"
+            counter += 1
+        
+        # Copia il file nella cartella inbox usando safe_copy
+        tmp_path_obj = Path(tmp_path).resolve()
+        inbox_saved_path = safe_copy(tmp_path_obj, inbox_saved_path)
+        logger.info(f"📁 File salvato in inbox: {inbox_saved_path.name}")
+        
+        # 2. Registra come PROCESSING (stesso flusso watchdog)
         try:
-            data = extract_from_pdf(tmp_path)
-            file_hash = get_file_hash(tmp_path) if tmp_path else None
+            transition_document_state(
+                doc_hash=file_hash,
+                from_state=None,
+                to_state=DocumentStatus.PROCESSING,
+                reason="Upload manuale - avvio processing",
+                metadata={
+                    "file_path": str(inbox_saved_path),
+                    "file_name": file.filename
+                }
+            )
+            logger.info(f"📄 Upload manuale registrato: hash={file_hash[:16]}... file={file.filename}")
+        except Exception as e:
+            logger.error(f"❌ Errore registrazione upload: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Errore durante la registrazione: {str(e)}")
+        
+            # 3. Estrai dati (stesso flusso watchdog)
+        try:
+            data = extract_from_pdf(str(inbox_saved_path))
+            extraction_mode = data.pop("_extraction_mode", None)  # Estrai extraction_mode dal risultato
             
-            # Salva una copia nella cartella inbox per permettere la riapertura dell'anteprima
-            from app.paths import get_inbox_dir, safe_copy
-            inbox_path = get_inbox_dir()
+            # Verifica se questo numero documento è già in Excel (controllo finale)
+            try:
+                from app.excel import read_excel_as_dict
+                existing_data = read_excel_as_dict()
+                for row in existing_data.get("rows", []):
+                    if (row.get("numero_documento") == data.get("numero_documento") and 
+                        row.get("mittente", "").strip() == data.get("mittente", "").strip()):
+                        logger.info(f"⏭️ DDT già presente in Excel (numero: {data.get('numero_documento')}), marco come FINALIZED - {file.filename}")
+                        from app.processed_documents import mark_document_finalized
+                        mark_document_finalized(file_hash)
+                        raise HTTPException(status_code=400, detail="DDT già presente in Excel")
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.debug(f"Errore controllo Excel: {e}")
+                # Continua comunque
             
-            # Genera un nome file basato sul numero documento e mittente per facilitare la ricerca
-            numero_doc = data.get("numero_documento", "").strip() or "UNKNOWN"
-            mittente_short = (data.get("mittente", "").strip()[:30] or "UNKNOWN").replace("/", "_").replace("\\", "_")
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            
-            # Nome file: numero_documento_mittente_timestamp.pdf
-            safe_filename = f"{numero_doc}_{mittente_short}_{timestamp}.pdf"
-            # Rimuovi caratteri non validi per i nomi file
-            safe_filename = "".join(c for c in safe_filename if c.isalnum() or c in "._- ")
-            safe_filename = safe_filename.replace(" ", "_")
-            
-            inbox_saved_path = inbox_path / safe_filename
-            
-            # Se il file esiste già, aggiungi un contatore
-            counter = 1
-            original_inbox_path = inbox_saved_path
-            while inbox_saved_path.exists():
-                name_part = original_inbox_path.stem
-                inbox_saved_path = inbox_path / f"{name_part}_{counter}.pdf"
-                counter += 1
-            
-            # Copia il file nella cartella inbox usando safe_copy
-            tmp_path_obj = Path(tmp_path).resolve()
-            inbox_saved_path = safe_copy(tmp_path_obj, inbox_saved_path)
-            logger.info(f"📁 Copia salvata in inbox: {inbox_saved_path.name}")
-            
-            # Genera PNG di anteprima se abbiamo l'hash
-            if file_hash:
-                try:
-                    preview_path = generate_preview_png(str(inbox_saved_path), file_hash)
-                    if preview_path:
-                        logger.info(f"✅ PNG anteprima generata: {preview_path}")
-                    else:
-                        logger.warning(f"⚠️ Impossibile generare PNG anteprima per {file_hash}")
-                except Exception as e:
-                    logger.warning(f"⚠️ Errore generazione PNG anteprima: {e}")
-            
-            # Converti PDF in base64 per visualizzarlo
+            # Converti PDF in base64
             pdf_base64 = base64.b64encode(content).decode()
             
-            logger.info(f"Dati estratti per anteprima: {data.get('numero_documento', 'N/A')}")
+            # Genera PNG di anteprima
+            preview_generated = False
+            try:
+                preview_path = generate_preview_png(str(inbox_saved_path), file_hash)
+                if preview_path:
+                    logger.info(f"✅ PNG anteprima generata: {preview_path}")
+                    preview_generated = True
+                else:
+                    logger.warning(f"⚠️ Impossibile generare PNG anteprima per {file_hash[:16]}...")
+            except Exception as e:
+                logger.warning(f"⚠️ Errore generazione PNG anteprima: {e}")
+            
+            # Aggiungi alla coda watchdog (stesso flusso)
+            from app.watchdog_queue import add_to_queue
+            queue_id = add_to_queue(str(inbox_saved_path), data, pdf_base64, file_hash)
+            logger.info(f"📋 Upload aggiunto alla coda: queue_id={queue_id} hash={file_hash[:16]}... numero={data.get('numero_documento', 'N/A')}")
+            
+            # Marca come READY_FOR_REVIEW quando tutto è pronto (stesso flusso watchdog)
+            mark_document_ready(file_hash, queue_id, extraction_mode)
+            logger.info(f"✅ Upload READY_FOR_REVIEW: hash={file_hash[:16]}... numero={data.get('numero_documento', 'N/A')} extraction_mode={extraction_mode or 'N/A'}")
             
             return JSONResponse({
                 "success": True,
                 "extracted_data": data,
-                "file_hash": file_hash or "manual_upload",
+                "file_hash": file_hash,
                 "file_name": file.filename,
-                "file_path": str(inbox_saved_path),  # Percorso salvato in inbox
+                "file_path": str(inbox_saved_path),
                 "pdf_base64": pdf_base64,
-                "pdf_mime": "application/pdf"
+                "pdf_mime": "application/pdf",
+                "queue_id": queue_id
             })
+        except HTTPException:
+            # Rilancia HTTPException così com'è
+            raise
         except ValueError as e:
-            logger.error(f"Errore validazione durante upload: {e}")
+            logger.error(f"❌ Errore validazione durante upload: {e}")
+            # Marca come ERROR_FINAL se abbiamo l'hash
+            if 'file_hash' in locals():
+                try:
+                    mark_document_error(file_hash, f"Errore validazione: {str(e)}")
+                except Exception:
+                    pass
             raise HTTPException(status_code=422, detail=f"Dati estratti non validi: {str(e)}")
+        except FileNotFoundError:
+            logger.warning(f"⚠️ File non trovato (potrebbe essere stato spostato): {inbox_saved_path if 'inbox_saved_path' in locals() else 'N/A'}")
+            if 'file_hash' in locals():
+                try:
+                    mark_document_error(file_hash, "File non trovato dopo upload")
+                except Exception:
+                    pass
+            raise HTTPException(status_code=404, detail="File non trovato")
         except Exception as e:
-            logger.error(f"Errore durante elaborazione upload: {e}", exc_info=True)
+            logger.error(f"❌ Errore durante elaborazione upload: {e}", exc_info=True)
+            # Marca come ERROR_FINAL se abbiamo l'hash
+            if 'file_hash' in locals():
+                try:
+                    mark_document_error(file_hash, f"Errore parsing: {str(e)}")
+                except Exception:
+                    pass
             raise HTTPException(status_code=500, detail=f"Errore durante l'elaborazione: {str(e)}")
     finally:
         # Elimina il file temporaneo (ora abbiamo la copia in inbox)
@@ -562,6 +712,130 @@ async def get_document_status_endpoint(file_hash: str, request: Request, auth: b
     except Exception as e:
         logger.error(f"Errore lettura stato documento: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Errore durante la lettura dello stato: {str(e)}")
+
+@app.get("/api/stuck-documents")
+async def get_stuck_documents_endpoint(request: Request, auth: bool = Depends(check_auth)):
+    """Endpoint per ottenere tutti i documenti in stato STUCK"""
+    try:
+        from app.processed_documents import get_stuck_documents
+        stuck_docs = get_stuck_documents()
+        return JSONResponse({
+            "success": True,
+            "count": len(stuck_docs),
+            "documents": stuck_docs
+        })
+    except Exception as e:
+        logger.error(f"Errore lettura documenti STUCK: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Errore durante la lettura dei documenti STUCK: {str(e)}")
+
+@app.post("/api/stuck-documents/{file_hash}/reprocess")
+async def reprocess_stuck_document_endpoint(file_hash: str, request: Request, auth: bool = Depends(check_auth)):
+    """
+    Endpoint per riprocessare manualmente un documento STUCK (STUCK → PROCESSING).
+    
+    Azione manuale utente: riavvia il processing di un documento bloccato.
+    """
+    try:
+        from app.processed_documents import (
+            get_document_status, 
+            DocumentStatus,
+            transition_document_state
+        )
+        
+        # Verifica che sia STUCK
+        current_status = get_document_status(file_hash)
+        if not current_status or current_status != DocumentStatus.STUCK.value:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Documento non in stato STUCK (stato attuale: {current_status})"
+            )
+        
+        # Transizione STUCK → PROCESSING
+        transition_document_state(
+            doc_hash=file_hash,
+            from_state=DocumentStatus.STUCK,
+            to_state=DocumentStatus.PROCESSING,
+            reason="Riprocessamento manuale da STUCK (azione utente)",
+            metadata=None
+        )
+        
+        logger.info(f"✅ Documento STUCK riprocessato: hash={file_hash[:16]}... (azione utente)")
+        
+        return JSONResponse({
+            "success": True,
+            "message": f"Documento {file_hash[:16]}... riprocessato con successo (STUCK → PROCESSING)"
+        })
+    except HTTPException:
+        raise
+    except ValueError as e:
+        logger.error(f"Errore validazione transizione STUCK → PROCESSING: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Errore riprocessamento documento STUCK: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Errore durante il riprocessamento: {str(e)}")
+
+@app.post("/api/stuck-documents/{file_hash}/reset")
+async def reset_stuck_document_endpoint(file_hash: str, request: Request, auth: bool = Depends(check_auth)):
+    """
+    DEPRECATO: Usa /reprocess invece.
+    Endpoint per resettare manualmente un documento STUCK a NEW (permette riprocessamento).
+    Mantenuto per backward compatibility.
+    """
+    try:
+        from app.processed_documents import reset_stuck_to_new
+        success = reset_stuck_to_new(file_hash)
+        if success:
+            return JSONResponse({
+                "success": True,
+                "message": f"Documento {file_hash[:16]}... reset a NEW con successo"
+            })
+        else:
+            raise HTTPException(status_code=404, detail="Documento non trovato o non in stato STUCK")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Errore reset documento STUCK: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Errore durante il reset: {str(e)}")
+
+@app.post("/api/stuck-documents/{file_hash}/convert-to-error")
+async def convert_stuck_to_error_endpoint(
+    file_hash: str, 
+    request: Request,
+    error_message: str = Form(...),
+    auth: bool = Depends(check_auth)
+):
+    """
+    Endpoint per convertire un documento STUCK in ERROR_FINAL.
+    
+    Usa questo quando:
+    - Il documento STUCK ha un errore strutturale irreversibile
+    - Dopo tentativi di riprocessamento falliti
+    - Quando si determina che il problema non è temporaneo
+    
+    Args:
+        file_hash: Hash del documento
+        error_message: Messaggio di errore definitivo (obbligatorio)
+    """
+    try:
+        if not error_message or not error_message.strip():
+            raise HTTPException(status_code=400, detail="error_message è obbligatorio")
+        
+        from app.processed_documents import convert_stuck_to_error_final
+        success = convert_stuck_to_error_final(file_hash, error_message)
+        
+        if success:
+            return JSONResponse({
+                "success": True,
+                "message": f"Documento {file_hash[:16]}... convertito a ERROR_FINAL con successo",
+                "error_message": error_message
+            })
+        else:
+            raise HTTPException(status_code=404, detail="Documento non trovato o non in stato STUCK")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Errore conversione STUCK → ERROR_FINAL: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Errore durante la conversione: {str(e)}")
 
 @app.get("/api/watchdog-queue")
 async def get_watchdog_queue(request: Request, auth: bool = Depends(check_auth)):
