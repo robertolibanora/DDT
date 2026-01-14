@@ -196,7 +196,14 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
     
     try:
         # Leggi il file PDF
-        with open(file_path, "rb") as f:
+        from app.paths import safe_open
+        file_path_obj = Path(file_path)
+        if not file_path_obj.is_absolute():
+            from app.paths import get_base_dir
+            file_path_obj = get_base_dir() / file_path_obj
+        file_path_obj = file_path_obj.resolve()
+        
+        with safe_open(file_path_obj, "rb") as f:
             pdf_bytes = f.read()
         
         if not pdf_bytes:
@@ -653,32 +660,45 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
         raise ValueError(f"Errore durante l'elaborazione del PDF: {str(e)}") from e
 
 
-def generate_preview_png(file_path: str, file_hash: str, output_dir: str = "temp/preview") -> Optional[str]:
+def generate_preview_png(file_path: str, file_hash: str, output_dir: Optional[str] = None) -> Optional[str]:
     """
     Genera e salva una PNG di anteprima dalla prima pagina del PDF
     
     Args:
         file_path: Percorso del file PDF
         file_hash: Hash del file (usato come nome file PNG)
-        output_dir: Directory dove salvare la PNG (default: temp/preview)
+        output_dir: Directory dove salvare la PNG (default: usa get_preview_dir())
         
     Returns:
         Percorso del file PNG salvato o None se fallito
     """
     from pathlib import Path
+    from app.paths import get_preview_dir, safe_open, ensure_dir
     
     try:
         # Leggi il file PDF
-        with open(file_path, "rb") as f:
+        file_path_obj = Path(file_path)
+        if not file_path_obj.is_absolute():
+            from app.paths import get_base_dir
+            file_path_obj = get_base_dir() / file_path_obj
+        file_path_obj = file_path_obj.resolve()
+        
+        with safe_open(file_path_obj, "rb") as f:
             pdf_bytes = f.read()
         
         if not pdf_bytes:
             logger.warning(f"File PDF vuoto: {file_path}")
             return None
         
-        # Crea directory se non esiste
-        preview_dir = Path(output_dir)
-        preview_dir.mkdir(parents=True, exist_ok=True)
+        # Usa directory preview standardizzata se non specificata
+        if output_dir is None:
+            preview_dir = get_preview_dir()
+        else:
+            preview_dir = Path(output_dir)
+            if not preview_dir.is_absolute():
+                from app.paths import get_base_dir
+                preview_dir = get_base_dir() / preview_dir
+            preview_dir = ensure_dir(preview_dir.resolve())
         
         png_path = preview_dir / f"{file_hash}.png"
         
@@ -758,7 +778,8 @@ def generate_preview_png(file_path: str, file_hash: str, output_dir: str = "temp
             return None
         
         # Salva la PNG
-        with open(png_path, 'wb') as f:
+        from app.paths import safe_open
+        with safe_open(png_path, 'wb') as f:
             f.write(img_bytes)
         
         logger.info(f"✅ PNG anteprima salvata: {png_path} ({len(img_bytes)} bytes)")

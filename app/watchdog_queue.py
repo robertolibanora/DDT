@@ -18,7 +18,8 @@ _queue_lock = threading.Lock()
 # Coda in memoria (in produzione potresti usare Redis o database)
 _watchdog_queue: List[Dict[str, Any]] = []
 
-QUEUE_FILE = Path("app/watchdog_queue.json")
+from app.paths import get_watchdog_queue_file
+QUEUE_FILE = get_watchdog_queue_file()
 
 # Configurazione pulizia automatica
 MAX_QUEUE_SIZE = 1000  # Massimo numero di elementi in coda
@@ -31,7 +32,8 @@ def _load_queue() -> List[Dict[str, Any]]:
     
     if QUEUE_FILE.exists():
         try:
-            with open(QUEUE_FILE, 'r', encoding='utf-8') as f:
+            from app.paths import safe_open
+            with safe_open(QUEUE_FILE, 'r', encoding='utf-8') as f:
                 _watchdog_queue = json.load(f)
             logger.info(f"Caricata coda watchdog con {len(_watchdog_queue)} elementi")
         except Exception as e:
@@ -46,7 +48,8 @@ def _load_queue() -> List[Dict[str, Any]]:
 def _save_queue():
     """Salva la coda su file"""
     try:
-        with open(QUEUE_FILE, 'w', encoding='utf-8') as f:
+        from app.paths import safe_open
+        with safe_open(QUEUE_FILE, 'w', encoding='utf-8') as f:
             json.dump(_watchdog_queue, f, indent=2, ensure_ascii=False)
     except Exception as e:
         logger.warning(f"Errore salvataggio coda: {e}")

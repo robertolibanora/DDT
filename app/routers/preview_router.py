@@ -17,9 +17,9 @@ from app.watchdog_queue import get_all_items, mark_as_processed
 from app.extract import generate_preview_png
 from app.layout_rules.manager import get_all_layout_rules, match_layout_rule, load_layout_rules
 
-# Directory temporanea per i file di anteprima
-TEMP_PREVIEW_DIR = Path("temp/preview")
-TEMP_PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
+from app.paths import get_preview_dir
+# Directory temporanea per i file di anteprima (path assoluto)
+TEMP_PREVIEW_DIR = get_preview_dir()
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,14 @@ def generate_preview_png(pdf_path: str, file_hash: str) -> Path:
     
     try:
         # Leggi il PDF
-        with open(pdf_path, 'rb') as f:
+        from app.paths import safe_open
+        pdf_path_obj = Path(pdf_path)
+        if not pdf_path_obj.is_absolute():
+            from app.paths import get_base_dir
+            pdf_path_obj = get_base_dir() / pdf_path_obj
+        pdf_path_obj = pdf_path_obj.resolve()
+        
+        with safe_open(pdf_path_obj, 'rb') as f:
             pdf_bytes = f.read()
         
         if len(pdf_bytes) == 0:
@@ -133,7 +140,8 @@ async def get_preview_image(
         if not png_path.exists():
             # Cerca il PDF nella cartella inbox
             pdf_path = None
-            inbox_path = Path(INBOX_DIR)
+            from app.paths import get_inbox_dir
+            inbox_path = get_inbox_dir()
             
             if inbox_path.exists():
                 for pdf_file in inbox_path.glob("*.pdf"):
@@ -205,7 +213,8 @@ async def get_preview_image(
             logger.info(f"PNG anteprima non trovata per hash {file_hash}, provo a generarla...")
             
             # Cerca il PDF nella cartella inbox
-            inbox_path = Path(INBOX_DIR)
+            from app.paths import get_inbox_dir
+            inbox_path = get_inbox_dir()
             pdf_file = None
             
             if inbox_path.exists():
@@ -297,7 +306,8 @@ async def save_preview(
         
         # Cerca il file originale nella cartella inbox (priorità)
         file_path = None
-        inbox_path = Path(INBOX_DIR)
+        from app.paths import get_inbox_dir
+        inbox_path = get_inbox_dir()
         
         if inbox_path.exists():
             for pdf_file in inbox_path.glob("*.pdf"):
@@ -316,7 +326,7 @@ async def save_preview(
         
         # Se non trovato, usa un path virtuale basato su hash (per correzioni senza file)
         if not file_path:
-            file_path = f"temp/preview/{file_hash}_{file_name}"
+            file_path = str(TEMP_PREVIEW_DIR / f"{file_hash}_{file_name}")
         
         # Parse annotazioni se presenti
         annotations_data = None
@@ -339,10 +349,13 @@ async def save_preview(
         finalization_error = None
         
         # Verifica che il file sia in inbox (necessario per finalizzazione)
-        inbox_path_obj = Path(INBOX_DIR)
+        from app.paths import get_inbox_dir
+        inbox_path_obj = get_inbox_dir()
         file_path_obj = Path(file_path) if file_path else None
         
-        if file_path_obj and file_path_obj.exists() and str(file_path_obj.resolve()).startswith(str(inbox_path_obj.resolve())):
+        if file_path_obj and file_path_obj.exists():
+            file_path_obj = file_path_obj.resolve()
+            if str(file_path_obj).startswith(str(inbox_path_obj.resolve())):
             try:
                 from app.finalization import finalize_document
                 from app.processed_documents import calculate_file_hash
@@ -523,7 +536,8 @@ async def apply_model(
         if preview_file.exists():
             file_path = str(preview_file)
         else:
-            inbox_path = Path(INBOX_DIR)
+            from app.paths import get_inbox_dir
+            inbox_path = get_inbox_dir()
             if inbox_path.exists():
                 for pdf_file in inbox_path.glob("*.pdf"):
                     try:

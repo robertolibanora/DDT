@@ -11,6 +11,8 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 from contextlib import contextmanager
 
+# NOTA: Usa get_excel_file() e get_excel_dir() da app.paths invece di EXCEL_FILE/EXCEL_DIR
+# Manteniamo import per compatibilità ma useremo paths quando possibile
 from app.config import EXCEL_FILE, EXCEL_DIR
 from app.models import DDTData
 
@@ -24,12 +26,16 @@ HEADERS = ["data", "mittente", "destinatario", "numero_documento", "totale_kg"]
 
 def _ensure_excel_exists() -> None:
     """Crea il file Excel con gli header se non esiste"""
-    if os.path.exists(EXCEL_FILE):
+    from app.paths import get_excel_file
+    excel_file = get_excel_file()
+    
+    if excel_file.exists():
         return
     
     try:
-        # Assicura che la directory Excel esista
-        Path(EXCEL_DIR).mkdir(parents=True, exist_ok=True)
+        # Assicura che la directory Excel esista usando sistema paths
+        from app.paths import get_excel_dir, ensure_dir
+        excel_dir = get_excel_dir()
         
         wb = Workbook()
         ws = wb.active
@@ -40,8 +46,8 @@ def _ensure_excel_exists() -> None:
         for cell in ws[1]:
             cell.font = Font(bold=True)
         
-        wb.save(EXCEL_FILE)
-        logger.info(f"File Excel creato: {EXCEL_FILE}")
+        wb.save(str(excel_file))
+        logger.info(f"File Excel creato: {excel_file}")
     except Exception as e:
         logger.error(f"Errore creazione file Excel: {e}")
         raise
@@ -89,13 +95,15 @@ def append_to_excel(data: Dict[str, Any]) -> None:
         with _excel_operation():
             # Carica il workbook
             try:
-                wb = load_workbook(EXCEL_FILE)
+                from app.paths import get_excel_file
+                wb = load_workbook(str(get_excel_file()))
                 ws = wb.active
             except (InvalidFileException, FileNotFoundError) as e:
                 logger.error(f"Errore caricamento Excel: {e}")
                 # Ricrea il file
                 _ensure_excel_exists()
-                wb = load_workbook(EXCEL_FILE)
+                from app.paths import get_excel_file
+                wb = load_workbook(str(get_excel_file()))
                 ws = wb.active
             
             # Verifica che l'header sia presente
@@ -107,7 +115,9 @@ def append_to_excel(data: Dict[str, Any]) -> None:
             
             # Salva in modo sicuro
             try:
-                wb.save(EXCEL_FILE)
+                from app.paths import get_excel_file
+                excel_file = get_excel_file()
+                wb.save(str(excel_file))
                 logger.info(f"DDT aggiunto a Excel: {ddt_data.numero_documento}")
             except PermissionError:
                 logger.error(f"Errore: file Excel è aperto da un altro programma")
@@ -160,13 +170,15 @@ def update_or_append_to_excel(data: Dict[str, Any]) -> bool:
         with _excel_operation():
             # Carica il workbook
             try:
-                wb = load_workbook(EXCEL_FILE)
+                from app.paths import get_excel_file
+                wb = load_workbook(str(get_excel_file()))
                 ws = wb.active
             except (InvalidFileException, FileNotFoundError) as e:
                 logger.error(f"Errore caricamento Excel: {e}")
                 # Ricrea il file
                 _ensure_excel_exists()
-                wb = load_workbook(EXCEL_FILE)
+                from app.paths import get_excel_file
+                wb = load_workbook(str(get_excel_file()))
                 ws = wb.active
             
             # Verifica che l'header sia presente
@@ -229,7 +241,8 @@ def update_or_append_to_excel(data: Dict[str, Any]) -> bool:
             
             # Salva in modo sicuro
             try:
-                wb.save(EXCEL_FILE)
+                from app.paths import get_excel_file
+                wb.save(str(get_excel_file()))
                 if updated:
                     logger.info(f"DDT aggiornato in Excel: {ddt_data.numero_documento}")
                 else:
@@ -263,7 +276,8 @@ def read_excel_as_dict() -> Dict[str, List[Dict[str, Any]]]:
     try:
         with _excel_operation():
             try:
-                wb = load_workbook(EXCEL_FILE, data_only=True)
+                from app.paths import get_excel_file
+                wb = load_workbook(str(get_excel_file()), data_only=True)
                 ws = wb.active
             except (InvalidFileException, FileNotFoundError) as e:
                 logger.warning(f"File Excel non leggibile: {e}, restituisco lista vuota")
@@ -327,7 +341,8 @@ def clear_all_ddt() -> Dict[str, Any]:
         with _excel_operation():
             # Carica il workbook
             try:
-                wb = load_workbook(EXCEL_FILE)
+                from app.paths import get_excel_file
+                wb = load_workbook(str(get_excel_file()))
                 ws = wb.active
             except (InvalidFileException, FileNotFoundError) as e:
                 logger.error(f"Errore caricamento Excel: {e}")
@@ -350,7 +365,8 @@ def clear_all_ddt() -> Dict[str, Any]:
             
             # Salva in modo sicuro
             try:
-                wb.save(EXCEL_FILE)
+                from app.paths import get_excel_file
+                wb.save(str(get_excel_file()))
                 logger.info(f"Cancellati {rows_before} DDT dal file Excel")
                 return {
                     "success": True,
@@ -380,10 +396,12 @@ def get_excel_stats() -> Dict[str, Any]:
     
     try:
         with _excel_operation():
-            if not os.path.exists(EXCEL_FILE):
+            from app.paths import get_excel_file
+            excel_file = get_excel_file()
+            if not excel_file.exists():
                 return {"total_rows": 0, "file_exists": False}
             
-            wb = load_workbook(EXCEL_FILE, data_only=True)
+            wb = load_workbook(str(excel_file), data_only=True)
             ws = wb.active
             
             # Conta righe (escluso header)
@@ -392,7 +410,7 @@ def get_excel_stats() -> Dict[str, Any]:
             return {
                 "total_rows": total_rows,
                 "file_exists": True,
-                "last_modified": os.path.getmtime(EXCEL_FILE) if os.path.exists(EXCEL_FILE) else None,
+                "last_modified": excel_file.stat().st_mtime if excel_file.exists() else None,
             }
     except Exception as e:
         logger.error(f"Errore calcolo statistiche Excel: {e}")

@@ -87,11 +87,13 @@ class DDTHandler(FileSystemEventHandler):
             return
         
         # Normalizza il percorso per evitare duplicati
-        file_path = os.path.abspath(file_path)
+        from app.paths import get_inbox_dir
+        file_path_obj = Path(file_path).resolve()
+        file_path = str(file_path_obj)
         
         # Verifica che il file sia ancora in inbox (potrebbe essere stato spostato)
-        inbox_path = os.path.abspath(INBOX_DIR)
-        if not file_path.startswith(inbox_path):
+        inbox_path = get_inbox_dir()
+        if not str(file_path_obj).startswith(str(inbox_path.resolve())):
             logger.debug(f"⏭️ File non in inbox, ignoro: {Path(file_path).name}")
             return
         
@@ -141,7 +143,9 @@ class DDTHandler(FileSystemEventHandler):
             from app.watchdog_queue import add_to_queue
             
             # Leggi il file PDF
-            with open(file_path, 'rb') as f:
+            from app.paths import safe_open
+            file_path_obj = Path(file_path).resolve()
+            with safe_open(file_path_obj, 'rb') as f:
                 pdf_bytes = f.read()
             
             if len(pdf_bytes) == 0:
@@ -238,7 +242,8 @@ def start_watcher_background(observer: Observer):
     """Avvia il watcher in background"""
     try:
         observer.start()
-        inbox_path = os.path.abspath(INBOX_DIR)
+        from app.paths import get_inbox_dir
+        inbox_path = get_inbox_dir()
         print(f"👀 Watchdog attivo su {inbox_path} - I file PDF vengono processati automaticamente")
         logger.info(f"Watchdog avviato e monitora: {inbox_path}")
     except Exception as e:
@@ -247,11 +252,10 @@ def start_watcher_background(observer: Observer):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Assicurati che la cartella inbox esista
-    inbox_path = os.path.abspath(INBOX_DIR)
-    if not os.path.exists(inbox_path):
-        os.makedirs(inbox_path, exist_ok=True)
-        logger.info(f"📁 Cartella inbox creata: {inbox_path}")
+    # Assicurati che la cartella inbox esista (usando sistema paths centralizzato)
+    from app.paths import get_inbox_dir
+    inbox_path = get_inbox_dir()
+    logger.info(f"📁 Cartella inbox verificata: {inbox_path}")
     
     # Carica layout models all'avvio per loggare disponibilità
     try:
@@ -296,14 +300,16 @@ async def lifespan(app: FastAPI):
         logger.warning(f"⚠️ Errore durante lo shutdown del watchdog: {e}")
 
 app = FastAPI(lifespan=lifespan)
-templates = Jinja2Templates(directory="app/templates")
+from app.paths import get_app_dir
+templates = Jinja2Templates(directory=str(get_app_dir() / "templates"))
 
 # Aggiungi middleware per le sessioni (2 ore di durata)
 from app.config import SESSION_SECRET_KEY
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET_KEY, max_age=7200, same_site="lax", https_only=False)
 
 # Monta la cartella static per CSS e altri file statici
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+from app.paths import get_app_dir
+app.mount("/static", StaticFiles(directory=str(get_app_dir() / "static")), name="static")
 
 # Dependency per verificare autenticazione
 async def check_auth(request: Request):
@@ -411,8 +417,8 @@ async def upload_ddt(request: Request, file: UploadFile = File(...), auth: bool 
             file_hash = get_file_hash(tmp_path) if tmp_path else None
             
             # Salva una copia nella cartella inbox per permettere la riapertura dell'anteprima
-            inbox_path = Path(INBOX_DIR)
-            inbox_path.mkdir(parents=True, exist_ok=True)
+            from app.paths import get_inbox_dir, safe_copy
+            inbox_path = get_inbox_dir()
             
             # Genera un nome file basato sul numero documento e mittente per facilitare la ricerca
             numero_doc = data.get("numero_documento", "").strip() or "UNKNOWN"
@@ -435,8 +441,9 @@ async def upload_ddt(request: Request, file: UploadFile = File(...), auth: bool 
                 inbox_saved_path = inbox_path / f"{name_part}_{counter}.pdf"
                 counter += 1
             
-            # Copia il file nella cartella inbox
-            shutil.copy2(tmp_path, inbox_saved_path)
+            # Copia il file nella cartella inbox usando safe_copy
+            tmp_path_obj = Path(tmp_path).resolve()
+            inbox_saved_path = safe_copy(tmp_path_obj, inbox_saved_path)
             logger.info(f"📁 Copia salvata in inbox: {inbox_saved_path.name}")
             
             # Genera PNG di anteprima se abbiamo l'hash
@@ -572,21 +579,25 @@ async def get_watchdog_queue(request: Request, auth: bool = Depends(check_auth))
                 if file_path or file_name:
                     try:
                         # Prova prima con il file_path completo
+                        from app.paths import get_inbox_dir, safe_open
                         pdf_path = None
                         if file_path:
                             pdf_path = Path(file_path)
                             # Se è relativo, prova nella cartella inbox
                             if not pdf_path.is_absolute():
-                                pdf_path = Path(INBOX_DIR) / pdf_path.name
+                                inbox_dir = get_inbox_dir()
+                                pdf_path = inbox_dir / pdf_path.name
                         
                         # Se non trovato, prova con il file_name nella cartella inbox
                         if not pdf_path or not pdf_path.exists():
                             if file_name:
-                                pdf_path = Path(INBOX_DIR) / file_name
+                                inbox_dir = get_inbox_dir()
+                                pdf_path = inbox_dir / file_name
                         
                         # Se trovato, leggi e converti in base64
                         if pdf_path and pdf_path.exists():
-                            with open(pdf_path, 'rb') as f:
+                            pdf_path = pdf_path.resolve()
+                            with safe_open(pdf_path, 'rb') as f:
                                 pdf_bytes = f.read()
                             item["pdf_base64"] = base64.b64encode(pdf_bytes).decode()
                             logger.info(f"✅ PDF base64 rigenerato per item {item.get('id')} da {pdf_path}")

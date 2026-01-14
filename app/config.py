@@ -5,17 +5,22 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Root directory del progetto (default: /var/www/DDT)
+# NOTA: Non importare paths qui per evitare importazioni circolari
+# paths.py userà questa variabile d'ambiente direttamente
 BASE_DIR = os.getenv("DDT_BASE_DIR", "/var/www/DDT")
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 MODEL = os.getenv("MODEL", "gpt-4o-mini")
 
 # Path assoluti per filesystem produzione
+# NOTA: Questi vengono inizializzati lazy quando necessario per evitare importazioni circolari
+# Usa le funzioni da app.paths invece di queste costanti quando possibile
 EXCEL_DIR = os.path.join(BASE_DIR, "excel")
 EXCEL_FILE = os.path.join(EXCEL_DIR, "ddt.xlsx")
 INBOX_DIR = os.path.join(BASE_DIR, "inbox")
 # Directory per documenti processati (struttura: processati/gg-mm-yyyy/)
-PROCESSATI_DIR = os.path.join(BASE_DIR, os.getenv("PROCESSATI_SUBDIR", "processati"))
+PROCESSATI_SUBDIR = os.getenv("PROCESSATI_SUBDIR", "processed")
+PROCESSATI_DIR = os.path.join(BASE_DIR, PROCESSATI_SUBDIR)
 
 # Credenziali amministratore
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME")

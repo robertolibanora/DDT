@@ -49,7 +49,8 @@ async def reprocess_ddt(numero_documento: str, http_request: Request, request_da
             pdf_path = request_data.file_path
         else:
             # Cerca nella cartella inbox
-            inbox_path = Path(INBOX_DIR)
+            from app.paths import get_inbox_dir
+            inbox_path = get_inbox_dir()
             if inbox_path.exists():
                 for pdf_file in inbox_path.glob("*.pdf"):
                     # Prova a estrarre il numero documento dal nome file o dal contenuto

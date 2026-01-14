@@ -128,8 +128,10 @@ def finalize_document(
         return False, None, error_msg
     
     # Verifica che il file sia in inbox (sicurezza)
-    inbox_path = Path(INBOX_DIR).resolve()
-    if not str(source_path.resolve()).startswith(str(inbox_path.resolve())):
+    from app.paths import get_inbox_dir, ensure_dir, safe_move
+    inbox_path = get_inbox_dir()
+    source_path = source_path.resolve()
+    if not str(source_path).startswith(str(inbox_path.resolve())):
         error_msg = f"File non è in inbox: {file_path}"
         logger.error(f"❌ {error_msg}")
         return False, None, error_msg
@@ -140,18 +142,13 @@ def finalize_document(
         logger.info(f"📝 Nome file finale generato: {final_filename}")
         
         # Crea percorso destinazione: processati/gg-mm-yyyy/
-        processati_base = Path(PROCESSATI_DIR).resolve()
+        from app.paths import get_processed_dir
+        processati_base = get_processed_dir()
         target_dir = processati_base / data_inserimento
         
-        # Crea cartella se non esiste
-        target_dir.mkdir(parents=True, exist_ok=True)
+        # Crea cartella se non esiste e verifica scrivibilità
+        target_dir = ensure_dir(target_dir)
         logger.info(f"📁 Cartella destinazione: {target_dir}")
-        
-        # Verifica permessi scrittura
-        if not os.access(target_dir, os.W_OK):
-            error_msg = f"Cartella non scrivibile: {target_dir}"
-            logger.error(f"❌ {error_msg}")
-            raise OSError(error_msg)
         
         # Percorso file finale
         target_path = target_dir / final_filename
@@ -166,8 +163,8 @@ def finalize_document(
             if counter > 1000:  # Protezione contro loop infiniti
                 raise OSError(f"Troppi file duplicati per {final_filename}")
         
-        # Sposta il file (operazione atomica)
-        shutil.move(str(source_path), str(target_path))
+        # Sposta il file (operazione atomica) usando safe_move
+        target_path = safe_move(source_path, target_path)
         logger.info(f"✅ File spostato: {source_path.name} → {target_path}")
         
         # Verifica che il file sia stato spostato correttamente

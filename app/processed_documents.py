@@ -24,7 +24,8 @@ class DocumentStatus(str, Enum):
     ERROR_FINAL = "ERROR_FINAL"
 
 
-PROCESSED_DOCUMENTS_FILE = Path("app/processed_documents.json")
+from app.paths import get_processed_documents_file
+PROCESSED_DOCUMENTS_FILE = get_processed_documents_file()
 
 # Struttura dati:
 # {
@@ -67,8 +68,9 @@ def _load_documents() -> Dict[str, Any]:
 def _save_documents(data: Dict[str, Any]) -> None:
     """Salva i documenti processati su file"""
     try:
-        PROCESSED_DOCUMENTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(PROCESSED_DOCUMENTS_FILE, 'w', encoding='utf-8') as f:
+        from app.paths import ensure_dir, safe_open
+        ensure_dir(PROCESSED_DOCUMENTS_FILE.parent)
+        with safe_open(PROCESSED_DOCUMENTS_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
     except Exception as e:
         logger.error(f"Errore salvataggio processed_documents: {e}", exc_info=True)
@@ -86,14 +88,22 @@ def calculate_file_hash(file_path: str) -> str:
         Hash SHA256 in formato esadecimale
     """
     try:
-        with open(file_path, 'rb') as f:
+        from app.paths import safe_open
+        # file_path può essere già assoluto o relativo
+        file_path_obj = Path(file_path)
+        if not file_path_obj.is_absolute():
+            from app.paths import get_base_dir
+            file_path_obj = get_base_dir() / file_path_obj
+        file_path_obj = file_path_obj.resolve()
+        
+        with safe_open(file_path_obj, 'rb') as f:
             file_bytes = f.read()
             file_hash = hashlib.sha256(file_bytes).hexdigest()
         return file_hash
     except Exception as e:
         logger.warning(f"Errore calcolo hash SHA256 file {file_path}: {e}")
         # Fallback: usa il nome del file (non ideale ma meglio di niente)
-        return hashlib.sha256(file_path.encode()).hexdigest()
+        return hashlib.sha256(str(file_path).encode()).hexdigest()
 
 
 def is_document_finalized(doc_hash: str) -> bool:

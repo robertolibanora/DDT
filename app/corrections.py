@@ -13,8 +13,9 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-CORRECTIONS_FILE = Path("app/corrections/corrections.json")
-CORRECTIONS_DIR = Path("app/corrections")
+from app.paths import get_corrections_file, get_corrections_dir
+CORRECTIONS_FILE = get_corrections_file()
+CORRECTIONS_DIR = get_corrections_dir()
 
 # Soglia per creazione automatica regole (numero di correzioni simili)
 AUTO_RULE_THRESHOLD = 5
@@ -25,7 +26,8 @@ _corrections_cache: Optional[Dict[str, Any]] = None
 
 def _ensure_corrections_dir():
     """Assicura che la directory delle correzioni esista"""
-    CORRECTIONS_DIR.mkdir(parents=True, exist_ok=True)
+    from app.paths import ensure_dir
+    ensure_dir(CORRECTIONS_DIR)
 
 
 def _load_corrections() -> Dict[str, Any]:
@@ -89,7 +91,8 @@ def _save_corrections(corrections: Dict[str, Any]) -> None:
     _ensure_corrections_dir()
     
     try:
-        with open(CORRECTIONS_FILE, 'w', encoding='utf-8') as f:
+        from app.paths import safe_open
+        with safe_open(CORRECTIONS_FILE, 'w', encoding='utf-8') as f:
             json.dump(corrections, f, indent=2, ensure_ascii=False)
         logger.info(f"Correzioni salvate in {CORRECTIONS_FILE}")
     except Exception as e:
@@ -114,13 +117,20 @@ def get_file_hash(file_path: str) -> str:
     except ImportError:
         # Fallback: calcola direttamente
         try:
-            with open(file_path, 'rb') as f:
+            from app.paths import safe_open
+            file_path_obj = Path(file_path)
+            if not file_path_obj.is_absolute():
+                from app.paths import get_base_dir
+                file_path_obj = get_base_dir() / file_path_obj
+            file_path_obj = file_path_obj.resolve()
+            
+            with safe_open(file_path_obj, 'rb') as f:
                 file_hash = hashlib.sha256(f.read()).hexdigest()
             return file_hash
         except Exception as e:
             logger.warning(f"Errore calcolo hash SHA256 file {file_path}: {e}")
             # Fallback: usa il nome del file
-            return hashlib.sha256(file_path.encode()).hexdigest()
+            return hashlib.sha256(str(file_path).encode()).hexdigest()
 
 
 def _create_auto_rule_from_pattern(pattern_data: Dict[str, Any], corrected_data: Dict[str, Any]) -> Optional[str]:
