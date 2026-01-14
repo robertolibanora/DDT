@@ -4,12 +4,18 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Root directory del progetto (default: /var/www/DDT)
+BASE_DIR = os.getenv("DDT_BASE_DIR", "/var/www/DDT")
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 MODEL = os.getenv("MODEL", "gpt-4o-mini")
-EXCEL_FILE = "ddt.xlsx"
-INBOX_DIR = "inbox"
+
+# Path assoluti per filesystem produzione
+EXCEL_DIR = os.path.join(BASE_DIR, "excel")
+EXCEL_FILE = os.path.join(EXCEL_DIR, "ddt.xlsx")
+INBOX_DIR = os.path.join(BASE_DIR, "inbox")
 # Directory per documenti processati (struttura: processati/gg-mm-yyyy/)
-PROCESSATI_DIR = os.getenv("PROCESSATI_DIR", "processati")
+PROCESSATI_DIR = os.path.join(BASE_DIR, os.getenv("PROCESSATI_SUBDIR", "processati"))
 
 # Credenziali amministratore
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME")

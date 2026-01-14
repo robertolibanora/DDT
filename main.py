@@ -35,7 +35,7 @@ def health():
 # Configura logging
 setup_logging()
 logger = logging.getLogger(__name__)
-
+                            
 def get_local_ip():
     """Ottiene l'IP locale della macchina"""
     try:

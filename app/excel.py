@@ -11,7 +11,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 from contextlib import contextmanager
 
-from app.config import EXCEL_FILE
+from app.config import EXCEL_FILE, EXCEL_DIR
 from app.models import DDTData
 
 logger = logging.getLogger(__name__)
@@ -28,6 +28,9 @@ def _ensure_excel_exists() -> None:
         return
     
     try:
+        # Assicura che la directory Excel esista
+        Path(EXCEL_DIR).mkdir(parents=True, exist_ok=True)
+        
         wb = Workbook()
         ws = wb.active
         ws.append(HEADERS)
