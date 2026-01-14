@@ -221,7 +221,8 @@
                                 data.file_hash,
                                 data.file_name,
                                 data.extraction_mode || null,
-                                data.suggest_create_layout || false
+                                data.suggest_create_layout || false,
+                                data.has_layout_model !== undefined ? data.has_layout_model : null
                             );
                             console.log('Modal.show chiamato con successo');
                             

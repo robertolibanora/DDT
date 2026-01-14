@@ -386,7 +386,7 @@ class PreviewModal {
         }
     }
 
-    show(extractedData, pdfBase64, fileHash, fileName, extractionMode = null, suggestCreateLayout = false) {
+    show(extractedData, pdfBase64, fileHash, fileName, extractionMode = null, suggestCreateLayout = false, hasLayoutModel = null) {
         this.currentData = extractedData;
         this.currentFileHash = fileHash;
         this.currentFileName = fileName;
@@ -534,9 +534,20 @@ class PreviewModal {
         }
 
         // Mostra/nascondi banner suggerimento layout model
+        // Il banner appare SOLO se:
+        // - has_layout_model === false (più esplicito, preferito)
+        // - OPPURE extraction_mode == AI_FALLBACK (suggestCreateLayout == true, backward compatibility)
+        // NON appare per LAYOUT_MODEL o HYBRID_LAYOUT_AI (has_layout_model === true)
         const suggestBanner = document.getElementById('suggest-layout-banner');
         if (suggestBanner) {
-            if (suggestCreateLayout) {
+            // Determina se mostrare il banner:
+            // - Se hasLayoutModel è definito, usa quello (false = mostra banner)
+            // - Altrimenti fallback a suggestCreateLayout (true = mostra banner)
+            const shouldShowBanner = hasLayoutModel !== null 
+                ? (hasLayoutModel === false) 
+                : (suggestCreateLayout === true);
+            
+            if (shouldShowBanner) {
                 suggestBanner.classList.remove('hidden');
                 // Setup CTA button
                 const createLayoutBtn = document.getElementById('create-layout-btn');

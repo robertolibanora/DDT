@@ -483,7 +483,8 @@
                                             newItem.file_hash,
                                             newItem.file_name,
                                             newItem.extraction_mode || null,
-                                            newItem.suggest_create_layout || false
+                                            newItem.suggest_create_layout || false,
+                                            newItem.has_layout_model !== undefined ? newItem.has_layout_model : null
                                         );
                                     }
                                 },
@@ -572,7 +573,8 @@
                     item.file_hash,
                     item.file_name,
                     item.extraction_mode || null,
-                    item.suggest_create_layout || false
+                    item.suggest_create_layout || false,
+                    item.has_layout_model !== undefined ? item.has_layout_model : null
                 );
                 
             } catch (error) {

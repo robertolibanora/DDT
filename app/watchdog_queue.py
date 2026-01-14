@@ -74,8 +74,11 @@ def add_to_queue(file_path: str, extracted_data: Dict[str, Any], pdf_base64: str
     with _queue_lock:
         queue_id = f"{file_hash}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
-        # Calcola suggest_create_layout: true solo se extraction_mode == AI_FALLBACK
+        # Calcola flag per suggerimento layout model
+        # suggest_create_layout: true solo se extraction_mode == AI_FALLBACK
+        # has_layout_model: false quando extraction_mode == AI_FALLBACK (più esplicito)
         suggest_create_layout = (extraction_mode == "AI_FALLBACK")
+        has_layout_model = (extraction_mode in ("LAYOUT_MODEL", "HYBRID_LAYOUT_AI"))
         
         queue_item = {
             "id": queue_id,
@@ -86,8 +89,9 @@ def add_to_queue(file_path: str, extracted_data: Dict[str, Any], pdf_base64: str
             "pdf_base64": pdf_base64,
             "timestamp": datetime.now().isoformat(),
             "processed": False,
-            "extraction_mode": extraction_mode,  # Aggiunto extraction_mode
-            "suggest_create_layout": suggest_create_layout  # Flag di suggerimento
+            "extraction_mode": extraction_mode,  # Modalità di estrazione
+            "suggest_create_layout": suggest_create_layout,  # Flag di suggerimento (backward compatibility)
+            "has_layout_model": has_layout_model  # Flag esplicito: true se ha layout model
         }
         
         _watchdog_queue.append(queue_item)
@@ -149,14 +153,17 @@ def get_pending_items() -> List[Dict[str, Any]]:
                     metadata = get_document_metadata(file_hash)
                     if metadata and metadata.get("extraction_mode"):
                         item["extraction_mode"] = metadata["extraction_mode"]
-                        # Ricalcola suggest_create_layout
-                        item["suggest_create_layout"] = (item["extraction_mode"] == "AI_FALLBACK")
                         _save_queue()
                 
-                # Assicura che suggest_create_layout sia sempre presente
+                # Assicura che extraction_mode sia sempre presente (fallback a AI_FALLBACK)
+                extraction_mode = item.get("extraction_mode", "AI_FALLBACK")
+                
+                # Ricalcola flag layout model se mancanti
                 if "suggest_create_layout" not in item:
-                    extraction_mode = item.get("extraction_mode", "AI_FALLBACK")
                     item["suggest_create_layout"] = (extraction_mode == "AI_FALLBACK")
+                    _save_queue()
+                if "has_layout_model" not in item:
+                    item["has_layout_model"] = (extraction_mode in ("LAYOUT_MODEL", "HYBRID_LAYOUT_AI"))
                     _save_queue()
             
             pending_items.append(item)

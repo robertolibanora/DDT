@@ -659,6 +659,10 @@ async def upload_ddt(request: Request, file: UploadFile = File(...), auth: bool 
             mark_document_ready(file_hash, queue_id, extraction_mode)
             logger.info(f"✅ Upload READY_FOR_REVIEW: hash={file_hash[:16]}... numero={data.get('numero_documento', 'N/A')} extraction_mode={extraction_mode or 'N/A'}")
             
+            # Calcola flag layout model
+            suggest_create_layout = (extraction_mode == "AI_FALLBACK")
+            has_layout_model = (extraction_mode in ("LAYOUT_MODEL", "HYBRID_LAYOUT_AI"))
+            
             return JSONResponse({
                 "success": True,
                 "extracted_data": data,
@@ -668,8 +672,9 @@ async def upload_ddt(request: Request, file: UploadFile = File(...), auth: bool 
                 "pdf_base64": pdf_base64,
                 "pdf_mime": "application/pdf",
                 "queue_id": queue_id,
-                "extraction_mode": extraction_mode,  # Aggiunto extraction_mode
-                "suggest_create_layout": (extraction_mode == "AI_FALLBACK")  # Flag di suggerimento
+                "extraction_mode": extraction_mode,  # Modalità di estrazione
+                "suggest_create_layout": suggest_create_layout,  # Flag di suggerimento (backward compatibility)
+                "has_layout_model": has_layout_model  # Flag esplicito: true se ha layout model
             })
         except HTTPException:
             # Rilancia HTTPException così com'è
