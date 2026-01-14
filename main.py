@@ -2,6 +2,8 @@ import os
 import socket
 import threading
 import logging
+import signal
+import sys
 from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, Request, HTTPException, Form, Depends
@@ -26,6 +28,7 @@ from app.auth import (
     logout_user
 )
 from fastapi import FastAPI
+from typing import Optional
 
 app = FastAPI()
 
@@ -35,6 +38,69 @@ def health():
 # Configura logging
 setup_logging()
 logger = logging.getLogger(__name__)
+
+# Variabile globale per l'observer watchdog (per gestione shutdown)
+_global_observer: Optional[Observer] = None
+_shutdown_in_progress = False
+
+
+def stop_watchdog_safely():
+    """
+    Ferma il watchdog observer in modo sicuro.
+    Gestisce timeout e errori durante lo shutdown.
+    """
+    global _global_observer, _shutdown_in_progress
+    
+    if _shutdown_in_progress:
+        return
+    
+    _shutdown_in_progress = True
+    
+    if _global_observer is None:
+        logger.debug("⚠️ Observer non inizializzato, skip shutdown watchdog")
+        return
+    
+    try:
+        if _global_observer.is_alive():
+            logger.info("🛑 Arresto watchdog observer...")
+            _global_observer.stop()
+            _global_observer.join(timeout=5.0)
+            
+            if _global_observer.is_alive():
+                logger.warning("⚠️ Watchdog non terminato entro timeout di 5 secondi")
+            else:
+                logger.info("✅ Watchdog fermato correttamente")
+        else:
+            logger.debug("ℹ️ Watchdog già fermato")
+    except Exception as e:
+        logger.error(f"❌ Errore durante lo shutdown del watchdog: {e}", exc_info=True)
+    finally:
+        _global_observer = None
+
+
+def shutdown_handler(signum, frame):
+    """
+    Gestore per segnali di shutdown (SIGTERM, SIGINT).
+    Ferma il watchdog e termina il processo correttamente.
+    """
+    signal_name = "SIGTERM" if signum == signal.SIGTERM else "SIGINT"
+    logger.info(f"🛑 Shutdown signal ricevuto ({signal_name}), arresto watchdog e terminazione processo")
+    
+    try:
+        stop_watchdog_safely()
+    except Exception as e:
+        logger.error(f"❌ Errore durante shutdown handler: {e}", exc_info=True)
+    
+    # Log finale e exit
+    logger.info("✅ Shutdown completato, terminazione processo")
+    sys.exit(0)
+
+
+# Registra handler per segnali di shutdown (SIGTERM da systemd, SIGINT da Ctrl+C)
+# IMPORTANTE: Registrato a livello di modulo per essere attivo sempre, anche con systemd
+signal.signal(signal.SIGTERM, shutdown_handler)
+signal.signal(signal.SIGINT, shutdown_handler)
+logger.info("📡 Handler segnali di shutdown registrati (SIGTERM, SIGINT)")
                             
 def get_local_ip():
     """Ottiene l'IP locale della macchina"""
@@ -305,7 +371,10 @@ async def lifespan(app: FastAPI):
         logger.warning(f"⚠️ Errore caricamento layout models all'avvio: {e}")
     
     # Startup - avvia il watchdog in background
+    global _global_observer
     observer = Observer()
+    _global_observer = observer  # Salva riferimento globale per shutdown handler
+    
     try:
         handler = DDTHandler()  # Crea un'istanza singola dell'handler per mantenere lo stato
         observer.schedule(handler, inbox_path, recursive=False)
@@ -314,6 +383,7 @@ async def lifespan(app: FastAPI):
         logger.info(f"👀 Watchdog configurato per monitorare: {inbox_path}")
     except Exception as e:
         logger.error(f"❌ Errore nella configurazione del watchdog: {e}", exc_info=True)
+        _global_observer = None
     
     # Startup - avvia cleanup periodico per documenti STUCK
     def stuck_cleanup_loop():
@@ -346,14 +416,8 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    # Shutdown
-    try:
-        if observer.is_alive():
-            observer.stop()
-            observer.join(timeout=5.0)
-            logger.info("🛑 Watchdog fermato correttamente")
-    except Exception as e:
-        logger.warning(f"⚠️ Errore durante lo shutdown del watchdog: {e}")
+    # Shutdown (chiamato quando uvicorn termina normalmente)
+    stop_watchdog_safely()
 
 app = FastAPI(lifespan=lifespan)
 from app.paths import get_app_dir
@@ -967,5 +1031,11 @@ if __name__ == "__main__":
     print(f"🔗 URL Rete: http://{local_ip}:{port}")
     print("="*60 + "\n")
     
-    # Avvia il server su tutte le interfacce (0.0.0.0)
-    uvicorn.run(app, host=host, port=port)
+    try:
+        # Avvia il server su tutte le interfacce (0.0.0.0)
+        uvicorn.run(app, host=host, port=port)
+    except KeyboardInterrupt:
+        # Gestito anche da signal handler, ma per sicurezza
+        logger.info("🛑 KeyboardInterrupt ricevuto")
+        stop_watchdog_safely()
+        sys.exit(0)
