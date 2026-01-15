@@ -39,9 +39,12 @@ def health():
 setup_logging()
 logger = logging.getLogger(__name__)
 
-# Variabile globale per l'observer watchdog (per gestione shutdown)
+# Variabili globali per gestione shutdown (tutti i thread/task avviati)
+# REGOLA FERREA: TUTTI i thread DEVONO essere daemon=True per permettere shutdown veloce
 _global_observer: Optional[Observer] = None
+_cleanup_thread: Optional[threading.Thread] = None
 _shutdown_in_progress = False
+_cleanup_shutdown_flag = threading.Event()  # Flag per fermare il cleanup loop
 
 
 def stop_watchdog_safely():
@@ -52,47 +55,107 @@ def stop_watchdog_safely():
     global _global_observer, _shutdown_in_progress
     
     if _shutdown_in_progress:
+        logger.debug("⚠️ [STOP_WATCHDOG] Shutdown già in corso, skip")
         return
     
     _shutdown_in_progress = True
+    logger.info("🛑 [STOP_WATCHDOG] Inizio fermata watchdog...")
     
     if _global_observer is None:
-        logger.debug("⚠️ Observer non inizializzato, skip shutdown watchdog")
+        logger.debug("⚠️ [STOP_WATCHDOG] Observer non inizializzato, skip")
         return
     
     try:
         if _global_observer.is_alive():
-            logger.info("🛑 Arresto watchdog observer...")
+            logger.info("🛑 [STOP_WATCHDOG] Observer attivo, chiamata stop()...")
             _global_observer.stop()
+            logger.info("🛑 [STOP_WATCHDOG] Attesa terminazione observer (timeout 5s)...")
             _global_observer.join(timeout=5.0)
             
             if _global_observer.is_alive():
-                logger.warning("⚠️ Watchdog non terminato entro timeout di 5 secondi")
+                logger.warning("⚠️ [STOP_WATCHDOG] Watchdog non terminato entro timeout di 5 secondi")
             else:
-                logger.info("✅ Watchdog fermato correttamente")
+                logger.info("✅ [STOP_WATCHDOG] Watchdog fermato correttamente")
         else:
-            logger.debug("ℹ️ Watchdog già fermato")
+            logger.debug("ℹ️ [STOP_WATCHDOG] Watchdog già fermato")
     except Exception as e:
-        logger.error(f"❌ Errore durante lo shutdown del watchdog: {e}", exc_info=True)
+        logger.error(f"❌ [STOP_WATCHDOG] Errore durante lo shutdown del watchdog: {e}", exc_info=True)
     finally:
         _global_observer = None
+        logger.info("✅ [STOP_WATCHDOG] Cleanup completato")
+
+
+def stop_cleanup_thread_safely():
+    """
+    Ferma il thread di cleanup STUCK in modo sicuro.
+    Imposta il flag di shutdown e attende la terminazione del thread.
+    """
+    global _cleanup_thread, _cleanup_shutdown_flag
+    
+    logger.info("🧹 [STOP_CLEANUP] Inizio fermata cleanup thread...")
+    
+    if _cleanup_thread is None:
+        logger.debug("⚠️ [STOP_CLEANUP] Cleanup thread non inizializzato, skip")
+        return
+    
+    try:
+        if _cleanup_thread.is_alive():
+            logger.info("🧹 [STOP_CLEANUP] Thread attivo, impostazione flag shutdown...")
+            # Imposta flag di shutdown per interrompere il loop
+            _cleanup_shutdown_flag.set()
+            logger.info("🧹 [STOP_CLEANUP] Attesa terminazione thread (timeout 2s)...")
+            # Attendi terminazione thread (timeout 2 secondi)
+            _cleanup_thread.join(timeout=2.0)
+            
+            if _cleanup_thread.is_alive():
+                logger.warning("⚠️ [STOP_CLEANUP] Cleanup thread non terminato entro timeout di 2 secondi")
+            else:
+                logger.info("✅ [STOP_CLEANUP] Cleanup thread fermato correttamente")
+        else:
+            logger.debug("ℹ️ [STOP_CLEANUP] Cleanup thread già fermato")
+    except Exception as e:
+        logger.error(f"❌ [STOP_CLEANUP] Errore durante lo shutdown del cleanup thread: {e}", exc_info=True)
+    finally:
+        _cleanup_thread = None
+        _cleanup_shutdown_flag.clear()
+        logger.info("✅ [STOP_CLEANUP] Cleanup completato")
 
 
 def shutdown_handler(signum, frame):
     """
     Gestore per segnali di shutdown (SIGTERM, SIGINT).
-    Ferma il watchdog e termina il processo correttamente.
+    Ferma tutti i thread/task e termina il processo correttamente.
     """
     signal_name = "SIGTERM" if signum == signal.SIGTERM else "SIGINT"
-    logger.info(f"🛑 Shutdown signal ricevuto ({signal_name}), arresto watchdog e terminazione processo")
+    # Log immediato per verificare che il segnale arrivi
+    print(f"\n⛔ SIGTERM/SIGINT RICEVUTO ({signal_name}) - Inizio shutdown...", flush=True)
+    logger.critical(f"⛔ SIGTERM/SIGINT RICEVUTO ({signal_name}) - Inizio shutdown...")
     
     try:
-        stop_watchdog_safely()
+        # Ferma cleanup thread PRIMA del watchdog (ordine inverso rispetto startup)
+        logger.info("🧹 [SHUTDOWN] Fermata cleanup thread...")
+        stop_cleanup_thread_safely()
+        logger.info("✅ [SHUTDOWN] Cleanup thread fermato")
     except Exception as e:
-        logger.error(f"❌ Errore durante shutdown handler: {e}", exc_info=True)
+        logger.error(f"❌ Errore durante shutdown cleanup thread: {e}", exc_info=True)
     
-    # Log finale e exit
-    logger.info("✅ Shutdown completato, terminazione processo")
+    try:
+        # Ferma watchdog observer
+        logger.info("🛑 [SHUTDOWN] Fermata watchdog observer...")
+        stop_watchdog_safely()
+        logger.info("✅ [SHUTDOWN] Watchdog observer fermato")
+    except Exception as e:
+        logger.error(f"❌ Errore durante shutdown watchdog: {e}", exc_info=True)
+    
+    # Log finale e exit FORZATO
+    logger.critical("✅ [SHUTDOWN] Shutdown completato, terminazione processo FORZATA")
+    print("✅ [SHUTDOWN] Terminazione processo...", flush=True)
+    
+    # Forza terminazione immediata (os._exit bypassa cleanup Python)
+    os._exit(0)
+    
+    # Fallback: se os._exit non termina il processo (non dovrebbe mai arrivare qui)
+    logger.info("💀 Forcing process exit")
     sys.exit(0)
 
 
@@ -299,6 +362,7 @@ class DDTHandler(FileSystemEventHandler):
             return
         
         # Usa un thread separato per non bloccare il watchdog
+        # REGOLA FERREA: daemon=True per permettere shutdown veloce
         thread = threading.Thread(target=self._process_pdf, args=(event.src_path,), daemon=True)
         thread.start()
     
@@ -313,6 +377,7 @@ class DDTHandler(FileSystemEventHandler):
             return
         
         # Usa un thread separato per non bloccare il watchdog
+        # REGOLA FERREA: daemon=True per permettere shutdown veloce
         thread = threading.Thread(target=self._process_pdf, args=(event.dest_path,), daemon=True)
         thread.start()
     
@@ -378,6 +443,7 @@ async def lifespan(app: FastAPI):
     try:
         handler = DDTHandler()  # Crea un'istanza singola dell'handler per mantenere lo stato
         observer.schedule(handler, inbox_path, recursive=False)
+        # REGOLA FERREA: daemon=True per permettere shutdown veloce
         watcher_thread = threading.Thread(target=start_watcher_background, args=(observer,), daemon=True)
         watcher_thread.start()
         logger.info(f"👀 Watchdog configurato per monitorare: {inbox_path}")
@@ -386,23 +452,38 @@ async def lifespan(app: FastAPI):
         _global_observer = None
     
     # Startup - avvia cleanup periodico per documenti STUCK
+    global _cleanup_thread, _cleanup_shutdown_flag
+    _cleanup_shutdown_flag.clear()  # Reset flag all'avvio
+    
     def stuck_cleanup_loop():
         """Loop periodico per controllare e marcare documenti PROCESSING bloccati come STUCK"""
         import time
         from app.processed_documents import check_and_mark_stuck_documents
         # Esegui cleanup ogni 5 minuti
         cleanup_interval = 300  # 5 minuti
-        while True:
+        logger.info("🔍 Cleanup loop STUCK avviato")
+        
+        while not _cleanup_shutdown_flag.is_set():
             try:
-                time.sleep(cleanup_interval)
-                stuck_count = check_and_mark_stuck_documents()
-                if stuck_count > 0:
-                    logger.info(f"🔍 Cleanup STUCK: {stuck_count} documento(i) marcato(i) come STUCK")
+                # Usa wait invece di sleep per permettere interruzione immediata
+                if _cleanup_shutdown_flag.wait(timeout=cleanup_interval):
+                    # Flag di shutdown impostato, esci dal loop
+                    logger.info("🧹 Cleanup loop STUCK: shutdown richiesto, terminazione...")
+                    break
+                
+                # Esegui cleanup solo se shutdown non richiesto
+                if not _cleanup_shutdown_flag.is_set():
+                    stuck_count = check_and_mark_stuck_documents()
+                    if stuck_count > 0:
+                        logger.info(f"🔍 Cleanup STUCK: {stuck_count} documento(i) marcato(i) come STUCK")
             except Exception as e:
                 logger.error(f"❌ Errore nel cleanup STUCK: {e}", exc_info=True)
+        
+        logger.info("✅ Cleanup loop STUCK terminato")
     
-    cleanup_thread = threading.Thread(target=stuck_cleanup_loop, daemon=True)
-    cleanup_thread.start()
+    # REGOLA FERREA: daemon=True per permettere shutdown veloce
+    _cleanup_thread = threading.Thread(target=stuck_cleanup_loop, daemon=True)
+    _cleanup_thread.start()
     logger.info("🔍 Cleanup periodico STUCK avviato (controllo ogni 5 minuti)")
     
     # Esegui un controllo iniziale all'avvio
@@ -417,7 +498,27 @@ async def lifespan(app: FastAPI):
     yield
     
     # Shutdown (chiamato quando uvicorn termina normalmente)
-    stop_watchdog_safely()
+    logger.critical("⛔ [LIFESPAN] Shutdown richiesto dal lifecycle FastAPI, arresto di tutti i thread/task...")
+    print("⛔ [LIFESPAN] Shutdown lifecycle FastAPI...", flush=True)
+    
+    # Ferma cleanup thread PRIMA del watchdog (ordine inverso rispetto startup)
+    try:
+        logger.info("🧹 [LIFESPAN] Fermata cleanup thread...")
+        stop_cleanup_thread_safely()
+        logger.info("✅ [LIFESPAN] Cleanup thread fermato")
+    except Exception as e:
+        logger.error(f"❌ [LIFESPAN] Errore durante shutdown cleanup thread: {e}", exc_info=True)
+    
+    # Ferma watchdog observer
+    try:
+        logger.info("🛑 [LIFESPAN] Fermata watchdog observer...")
+        stop_watchdog_safely()
+        logger.info("✅ [LIFESPAN] Watchdog observer fermato")
+    except Exception as e:
+        logger.error(f"❌ [LIFESPAN] Errore durante shutdown watchdog: {e}", exc_info=True)
+    
+    logger.critical("✅ [LIFESPAN] Shutdown completato (tutti i thread/task fermati)")
+    print("✅ [LIFESPAN] Shutdown completato", flush=True)
 
 app = FastAPI(lifespan=lifespan)
 from app.paths import get_app_dir
@@ -1019,28 +1120,46 @@ async def delete_all_ddt(request: Request, auth: bool = Depends(check_auth)):
 if __name__ == "__main__":
     import uvicorn
     
+    # Log esplicito che siamo nel main
+    logger.info("="*60)
+    logger.info("🚀 [MAIN] Avvio applicazione FastAPI")
+    logger.info("="*60)
+    
     # Usa 0.0.0.0 per permettere connessioni da tutte le interfacce di rete
     # Questo permette l'accesso sia da localhost che dalla rete locale
     host = "0.0.0.0"  # Ascolta su tutte le interfacce
-    port = int(os.getenv("UVICORN_PORT", "8000"))
+    port_str = os.getenv("UVICORN_PORT", "8000")
+    port = int(port_str)
     local_ip = SERVER_IP  # Usa l'IP configurato
     
-    # Stampa le informazioni prima di avviare il server
-    print("\n" + "="*60)
-    print("🚀 Server FastAPI avviato")
-    print("="*60)
-    print(f"📍 Host: {host} (tutte le interfacce)")
-    print(f"🌐 IP Configurato: {local_ip}")
-    print(f"🔌 Porta: {port}")
-    print(f"🔗 URL Locale: http://127.0.0.1:{port}")
-    print(f"🔗 URL Rete: http://{local_ip}:{port}")
-    print("="*60 + "\n")
+    # Log esplicito host/port PRIMA di uvicorn.run
+    logger.info(f"📍 [MAIN] Host: {host} (tutte le interfacce)")
+    logger.info(f"🌐 [MAIN] IP Configurato: {local_ip}")
+    logger.info(f"🔌 [MAIN] Porta: {port} (da UVICORN_PORT={port_str})")
+    logger.info(f"🔗 [MAIN] URL Locale: http://127.0.0.1:{port}")
+    logger.info(f"🔗 [MAIN] URL Rete: http://{local_ip}:{port}")
+    logger.info("="*60)
+    
+    # Stampa anche su stdout per systemd
+    print(f"\n🚀 [MAIN] Avvio server FastAPI su {host}:{port}", flush=True)
+    print(f"📍 [MAIN] Host: {host}, Port: {port}, IP: {local_ip}", flush=True)
     
     try:
         # Avvia il server su tutte le interfacce (0.0.0.0)
+        logger.info(f"🚀 [MAIN] Chiamata uvicorn.run(app, host={host}, port={port})...")
         uvicorn.run(app, host=host, port=port)
+        logger.info("✅ [MAIN] uvicorn.run completato normalmente")
     except KeyboardInterrupt:
         # Gestito anche da signal handler, ma per sicurezza
-        logger.info("🛑 KeyboardInterrupt ricevuto")
-        stop_watchdog_safely()
-        sys.exit(0)
+        logger.critical("🛑 [MAIN] KeyboardInterrupt ricevuto")
+        print("🛑 [MAIN] KeyboardInterrupt ricevuto", flush=True)
+        try:
+            stop_cleanup_thread_safely()
+            stop_watchdog_safely()
+        except Exception as e:
+            logger.error(f"❌ [MAIN] Errore durante shutdown: {e}", exc_info=True)
+        os._exit(0)
+    except Exception as e:
+        logger.critical(f"❌ [MAIN] Errore fatale durante avvio server: {e}", exc_info=True)
+        print(f"❌ [MAIN] Errore fatale: {e}", flush=True)
+        os._exit(1)
