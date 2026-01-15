@@ -151,11 +151,14 @@ def load_layout_rules(force_reload: bool = False) -> Dict[str, LayoutRule]:
     Carica tutte le regole di layout dal file JSON
     Usa cache per evitare ricaricamento continuo (refresh automatico se file modificato)
     
+    FAIL-FAST: Nessun retry, nessun loop, nessuna attesa bloccante.
+    Se il file è vuoto/corrotto/mancante, ritorna {} immediatamente.
+    
     Args:
         force_reload: Se True, forza il ricaricamento ignorando la cache
         
     Returns:
-        Dizionario con nome_regola -> LayoutRule
+        Dizionario con nome_regola -> LayoutRule (mai None, sempre dict)
     """
     global _layout_rules_cache, _layout_rules_cache_timestamp
     
@@ -169,27 +172,44 @@ def load_layout_rules(force_reload: bool = False) -> Dict[str, LayoutRule]:
             # Se errore controllo timestamp, ricarica
             pass
     
+    # FAIL-FAST: Se file non esiste, ritorna {} immediatamente (no retry, no loop)
     if not LAYOUT_RULES_FILE.exists():
-        logger.warning(f"❌ File layout rules non trovato: {LAYOUT_RULES_FILE}")
-        logger.info(f"📁 Creo file vuoto: {LAYOUT_RULES_FILE}")
+        logger.warning(f"❌ [FAIL-FAST] File layout rules non trovato: {LAYOUT_RULES_FILE}")
+        logger.info(f"📁 [FAIL-FAST] Creo file vuoto: {LAYOUT_RULES_FILE}")
         # Crea directory se non esiste
-        LAYOUT_RULES_FILE.parent.mkdir(parents=True, exist_ok=True)
-        save_layout_rules({})
-        logger.info(f"✅ Loaded 0 layout rules: []")
+        try:
+            LAYOUT_RULES_FILE.parent.mkdir(parents=True, exist_ok=True)
+            # Solo se file NON esiste, crea file vuoto (safe)
+            if not LAYOUT_RULES_FILE.exists():
+                with open(LAYOUT_RULES_FILE, 'w', encoding='utf-8') as f:
+                    json.dump({}, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"❌ [FAIL-FAST] Errore creazione file vuoto: {e} - continuo senza blocchi")
+        logger.info(f"✅ [FAIL-FAST] Loaded 0 layout rules: []")
+        # Aggiorna cache vuota
+        _layout_rules_cache = {}
+        _layout_rules_cache_timestamp = None
         return {}
     
+    # FAIL-FAST: Caricamento one-shot, no retry
     try:
         with open(LAYOUT_RULES_FILE, 'r', encoding='utf-8') as f:
             file_content = f.read()
             if not file_content.strip():
-                logger.error(f"❌ File layout rules è vuoto: {LAYOUT_RULES_FILE}")
-                logger.info(f"✅ Loaded 0 layout rules: []")
+                logger.error(f"❌ [FAIL-FAST] File layout rules è vuoto: {LAYOUT_RULES_FILE}")
+                logger.info(f"✅ [FAIL-FAST] Loaded 0 layout rules: []")
+                # Aggiorna cache vuota
+                _layout_rules_cache = {}
+                _layout_rules_cache_timestamp = None
                 return {}
             data = json.loads(file_content)
         
         if not data:
-            logger.warning(f"❌ File layout rules contiene dati vuoti: {LAYOUT_RULES_FILE}")
-            logger.info(f"✅ Loaded 0 layout rules: []")
+            logger.warning(f"❌ [FAIL-FAST] File layout rules contiene dati vuoti: {LAYOUT_RULES_FILE}")
+            logger.info(f"✅ [FAIL-FAST] Loaded 0 layout rules: []")
+            # Aggiorna cache vuota
+            _layout_rules_cache = {}
+            _layout_rules_cache_timestamp = None
             return {}
         
         rules = {}
@@ -206,7 +226,7 @@ def load_layout_rules(force_reload: bool = False) -> Dict[str, LayoutRule]:
                 sender_counts[sender_normalized] = sender_counts.get(sender_normalized, 0) + 1
                 
             except Exception as e:
-                logger.warning(f"⚠️ Errore caricamento regola {rule_name}: {e}")
+                logger.warning(f"⚠️ [FAIL-FAST] Errore caricamento regola {rule_name}: {e} - skip regola")
                 continue
         
         # Log dettagliato per mittente
@@ -216,9 +236,9 @@ def load_layout_rules(force_reload: bool = False) -> Dict[str, LayoutRule]:
         # Log esplicito con lista delle chiavi
         rule_keys = list(rules.keys())
         if rule_keys:
-            logger.info(f"✅ Loaded {len(rules)} layout rules: {rule_keys}")
+            logger.info(f"✅ [FAIL-FAST] Loaded {len(rules)} layout rules: {rule_keys}")
         else:
-            logger.info(f"✅ Loaded {len(rules)} layout rules: []")
+            logger.info(f"✅ [FAIL-FAST] Loaded {len(rules)} layout rules: []")
         
         # Aggiorna cache
         _layout_rules_cache = rules
@@ -229,13 +249,19 @@ def load_layout_rules(force_reload: bool = False) -> Dict[str, LayoutRule]:
         
         return rules
     except json.JSONDecodeError as e:
-        logger.error(f"❌ Errore parsing JSON layout rules da {LAYOUT_RULES_FILE}: {e}")
-        logger.error(f"❌ File potrebbe essere corrotto o malformato")
-        logger.info(f"✅ Loaded 0 layout rules: []")
+        logger.error(f"❌ [FAIL-FAST] Errore parsing JSON layout rules da {LAYOUT_RULES_FILE}: {e}")
+        logger.error(f"❌ [FAIL-FAST] File potrebbe essere corrotto o malformato - ritorno {} immediatamente")
+        logger.info(f"✅ [FAIL-FAST] Loaded 0 layout rules: []")
+        # Aggiorna cache vuota
+        _layout_rules_cache = {}
+        _layout_rules_cache_timestamp = None
         return {}
     except Exception as e:
-        logger.error(f"❌ Errore caricamento layout rules da {LAYOUT_RULES_FILE}: {e}", exc_info=True)
-        logger.info(f"✅ Loaded 0 layout rules: []")
+        logger.error(f"❌ [FAIL-FAST] Errore caricamento layout rules da {LAYOUT_RULES_FILE}: {e}", exc_info=True)
+        logger.info(f"✅ [FAIL-FAST] Loaded 0 layout rules: []")
+        # Aggiorna cache vuota
+        _layout_rules_cache = {}
+        _layout_rules_cache_timestamp = None
         return {}
 
 
@@ -243,10 +269,28 @@ def save_layout_rules(rules: Dict[str, LayoutRule]):
     """
     Salva le regole di layout nel file JSON
     
+    PROTEZIONE ANTI-FREEZE:
+    - Se il file esiste già e contiene regole, NON sovrascrive con contenuto vuoto
+    - In caso di errore, mantiene il file precedente
+    - Fail-fast: abort immediato se problemi
+    
     Args:
         rules: Dizionario con nome_regola -> LayoutRule
     """
     global _layout_rules_cache, _layout_rules_cache_timestamp
+    
+    # PROTEZIONE: Se il file esiste già e contiene regole, NON sovrascrivere con contenuto vuoto
+    file_exists_with_rules = False
+    if LAYOUT_RULES_FILE.exists():
+        try:
+            existing_rules = load_layout_rules(force_reload=True)
+            if existing_rules and not rules:
+                logger.error(f"❌ [ANTI-FREEZE] Tentativo di sovrascrivere {len(existing_rules)} regola(e) esistenti con contenuto vuoto - ABORT")
+                raise ValueError(f"Protezione anti-freeze: impossibile sovrascrivere {len(existing_rules)} regola(e) esistenti con contenuto vuoto")
+            file_exists_with_rules = bool(existing_rules)
+        except Exception as e:
+            # Se errore nel caricamento esistente, procedi comunque (file potrebbe essere corrotto)
+            logger.warning(f"⚠️ [ANTI-FREEZE] Errore verifica regole esistenti: {e} - procedo con salvataggio")
     
     try:
         # Assicura che la directory esista
@@ -264,9 +308,34 @@ def save_layout_rules(rules: Dict[str, LayoutRule]):
             sender_normalized = normalize_sender(supplier)
             sender_counts[sender_normalized] = sender_counts.get(sender_normalized, 0) + 1
         
-        # Salva nel file
-        with open(LAYOUT_RULES_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        # PROTEZIONE: Salva prima in file temporaneo, poi rinomina (atomic write)
+        import tempfile
+        import shutil
+        temp_file = None
+        try:
+            # Crea file temporaneo nella stessa directory
+            temp_file = LAYOUT_RULES_FILE.with_suffix('.tmp')
+            
+            # Scrivi nel file temporaneo
+            with open(temp_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            
+            # Verifica che il file temporaneo non sia vuoto (se ci sono regole da salvare)
+            if rules and temp_file.stat().st_size == 0:
+                raise ValueError("File temporaneo risultato vuoto - abort per sicurezza")
+            
+            # Rinomina atomico (sostituisce il file esistente)
+            temp_file.replace(LAYOUT_RULES_FILE)
+            temp_file = None  # Evita cleanup
+            
+        except Exception as e:
+            # In caso di errore, elimina file temporaneo se esiste
+            if temp_file and temp_file.exists():
+                try:
+                    temp_file.unlink()
+                except Exception:
+                    pass
+            raise
         
         # Log dettagliato
         for sender_norm, count in sender_counts.items():
@@ -279,6 +348,7 @@ def save_layout_rules(rules: Dict[str, LayoutRule]):
         _layout_rules_cache_timestamp = None
     except Exception as e:
         logger.error(f"❌ Errore salvataggio layout rules: {e}", exc_info=True)
+        logger.error(f"❌ [ANTI-FREEZE] File precedente mantenuto: {LAYOUT_RULES_FILE}")
         raise
 
 

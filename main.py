@@ -447,9 +447,11 @@ async def lifespan(app: FastAPI):
                 for sender_norm, count in sender_counts.items():
                     logger.info(f"   📦 {role_label} [BACKGROUND_TASKS] Loaded {count} layout model(s) for sender: {sender_norm}")
             else:
-                logger.info(f"{role_label} [BACKGROUND_TASKS] Nessun layout model disponibile")
+                logger.warning(f"{role_label} [BACKGROUND_TASKS] ⚠️ Nessun layout model disponibile - sistema operativo ma userà AI fallback")
+                logger.info(f"{role_label} [HEARTBEAT] Sistema operativo – nessun documento in elaborazione – 0 layout models")
         except Exception as e:
             logger.error(f"{role_label} [BACKGROUND_TASKS] Errore caricamento layout models: {e}", exc_info=True)
+            logger.info(f"{role_label} [HEARTBEAT] Sistema operativo – nessun documento in elaborazione – errore caricamento layout models")
         
         try:
             # Carica e pulisci coda watchdog (in background)
@@ -465,6 +467,7 @@ async def lifespan(app: FastAPI):
             logger.error(f"{role_label} [BACKGROUND_TASKS] Errore caricamento/pulizia coda watchdog: {e}", exc_info=True)
         
         logger.info(f"{role_label} [BACKGROUND_TASKS] Tutti i task iniziali completati")
+        logger.info(f"{role_label} [HEARTBEAT] Sistema operativo – nessun documento in elaborazione – stato idle")
     
     # Avvia task iniziali in thread daemon (NON bloccante)
     # SOLO task leggeri (migrazione, layout models, cleanup coda) - NO watchdog/processing/cleanup STUCK
