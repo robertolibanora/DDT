@@ -29,25 +29,36 @@ SESSION_SECRET_KEY = os.getenv("SESSION_SECRET_KEY")
 
 # Configurazione IP - calcola automaticamente l'IP locale
 def get_local_ip():
-    """Ottiene l'IP locale della macchina sulla rete"""
+    """
+    Ottiene l'IP locale della macchina sulla rete.
+    
+    IMPORTANTE: Usa timeout per evitare blocchi durante l'import del modulo.
+    Fallback veloce a 127.0.0.1 se la rete non è disponibile.
+    """
     try:
         # Crea un socket e si connette a un server esterno per determinare l'IP locale
+        # Timeout breve per evitare blocchi (1 secondo)
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        # Non invia effettivamente dati, solo determina quale interfaccia userebbe
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
+        s.settimeout(1.0)  # Timeout 1 secondo per evitare blocchi
+        try:
+            # Non invia effettivamente dati, solo determina quale interfaccia userebbe
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+            s.close()
+            return ip
+        except (socket.timeout, OSError):
+            s.close()
+            raise  # Rilancia per usare fallback
     except Exception:
-        # Fallback: prova a ottenere l'hostname e risolverlo
+        # Fallback: prova a ottenere l'hostname e risolverlo (veloce)
         try:
             hostname = socket.gethostname()
             ip = socket.gethostbyname(hostname)
             # Se è 127.0.0.1, prova un altro metodo
             if ip == "127.0.0.1":
-                # Prova a ottenere l'IP da tutte le interfacce
+                # Prova a ottenere l'IP da tutte le interfacce (con timeout)
                 s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.settimeout(0)
+                s.settimeout(0.1)  # Timeout molto breve (100ms)
                 try:
                     s.connect(('10.254.254.254', 1))
                     ip = s.getsockname()[0]
@@ -57,6 +68,7 @@ def get_local_ip():
                     s.close()
             return ip
         except Exception:
+            # Fallback finale: usa localhost
             return "127.0.0.1"
 
 # Usa l'IP dalla variabile d'ambiente se presente, altrimenti calcolalo automaticamente

@@ -163,8 +163,17 @@ class DDTHandler(FileSystemEventHandler):
         super().__init__()
     
     def _process_pdf(self, file_path: str):
-        """Processa un file PDF rilevato dal watchdog - aggiunge alla coda per anteprima"""
+        """
+        Processa un file PDF rilevato dal watchdog - aggiunge alla coda per anteprima.
+        
+        IMPORTANTE: Questa funzione è SEMPRE eseguita in un thread daemon separato
+        (chiamata da on_created/on_moved) per NON bloccare mai il watchdog filesystem.
+        Operazioni pesanti (extract_from_pdf, I/O filesystem) sono accettabili qui.
+        """
+        logger.info(f"📄 [PROCESS_PDF] Avvio processing PDF: {Path(file_path).name}")
+        
         if not self._is_pdf_file(file_path):
+            logger.debug(f"⏭️ [PROCESS_PDF] File non PDF, ignoro: {file_path}")
             return
         
         # Normalizza il percorso per evitare duplicati
@@ -247,8 +256,12 @@ class DDTHandler(FileSystemEventHandler):
                 return
             
             # Estrai i dati (ma NON salvare ancora)
+            # OPERAZIONE PESANTE: extract_from_pdf può richiedere secondi/minuti
+            # OK perché siamo già in un thread daemon separato (non blocca watchdog)
+            logger.info(f"🔍 [PROCESS_PDF] Avvio estrazione dati da PDF: {Path(file_path).name}")
             data = extract_from_pdf(file_path)
             extraction_mode = data.pop("_extraction_mode", None)  # Estrai extraction_mode dal risultato
+            logger.info(f"✅ [PROCESS_PDF] Estrazione dati completata: {Path(file_path).name} (mode={extraction_mode})")
             
             # Verifica se questo numero documento è già in Excel (controllo finale)
             try:
@@ -281,30 +294,38 @@ class DDTHandler(FileSystemEventHandler):
                 logger.warning(f"⚠️ Errore generazione PNG anteprima: {e}")
             
             # Aggiungi alla coda per l'anteprima (con extraction_mode)
+            logger.info(f"📋 [PROCESS_PDF] Aggiunta alla coda watchdog: {Path(file_path).name}")
             queue_id = add_to_queue(file_path, data, pdf_base64, doc_hash, extraction_mode)
-            logger.info(f"📋 DDT aggiunto alla coda per anteprima: queue_id={queue_id} hash={doc_hash[:16]}... numero={data.get('numero_documento', 'N/A')}")
+            logger.info(f"✅ [PROCESS_PDF] DDT aggiunto alla coda: queue_id={queue_id} hash={doc_hash[:16]}... numero={data.get('numero_documento', 'N/A')}")
             
             # Marca come READY_FOR_REVIEW quando tutto è pronto (dati estratti + PNG + coda)
             # Questo permette alla dashboard di distinguere PROCESSING (tecnico) da READY_FOR_REVIEW (funzionale)
             from app.processed_documents import mark_document_ready
             mark_document_ready(doc_hash, queue_id, extraction_mode)
-            logger.info(f"✅ Documento READY_FOR_REVIEW per anteprima: hash={doc_hash[:16]}... numero={data.get('numero_documento', 'N/A')} extraction_mode={extraction_mode or 'N/A'}")
+            logger.info(f"✅ [PROCESS_PDF] Documento READY_FOR_REVIEW: hash={doc_hash[:16]}... numero={data.get('numero_documento', 'N/A')} extraction_mode={extraction_mode or 'N/A'}")
             
         except ValueError as e:
-            logger.error(f"❌ Errore validazione DDT: {e}")
+            logger.error(f"❌ [PROCESS_PDF] Errore validazione DDT: {e}")
             if 'doc_hash' in locals():
                 mark_document_error(doc_hash, f"Errore validazione: {str(e)}")
         except FileNotFoundError:
-            logger.warning(f"⚠️ File non trovato (potrebbe essere stato spostato): {file_path}")
+            logger.warning(f"⚠️ [PROCESS_PDF] File non trovato (potrebbe essere stato spostato): {file_path}")
             if 'doc_hash' in locals():
                 mark_document_error(doc_hash, "File non trovato")
         except Exception as e:
-            logger.error(f"❌ Errore nel parsing DDT: {e}", exc_info=True)
+            logger.error(f"❌ [PROCESS_PDF] Errore nel parsing DDT: {e}", exc_info=True)
             if 'doc_hash' in locals():
                 mark_document_error(doc_hash, f"Errore parsing: {str(e)}")
+        finally:
+            logger.info(f"🏁 [PROCESS_PDF] Processing completato: {Path(file_path).name}")
     
     def on_created(self, event):
-        """Gestisce SOLO l'evento di creazione file (ignora modified per idempotenza)"""
+        """
+        Gestisce SOLO l'evento di creazione file (ignora modified per idempotenza).
+        
+        IMPORTANTE: _process_pdf() viene SEMPRE eseguito in thread daemon separato
+        per NON bloccare mai il watchdog filesystem. Operazioni pesanti sono accettabili.
+        """
         # Filtra SOLO file PDF (non directory)
         if event.is_directory:
             return
@@ -313,13 +334,20 @@ class DDTHandler(FileSystemEventHandler):
         if not event.src_path.lower().endswith(".pdf"):
             return
         
-        # Usa un thread separato per non bloccare il watchdog
+        # Usa un thread separato per non bloccare il watchdog (NON-BLOCCANTE)
         # REGOLA FERREA: daemon=True per permettere shutdown veloce
+        logger.debug(f"📄 [WATCHDOG] Evento on_created: {Path(event.src_path).name}, avvio thread processing...")
         thread = threading.Thread(target=self._process_pdf, args=(event.src_path,), daemon=True)
         thread.start()
+        logger.debug(f"✅ [WATCHDOG] Thread processing avviato per: {Path(event.src_path).name}")
     
     def on_moved(self, event):
-        """Gestisce l'evento di spostamento file (quando un file viene copiato/spostato in inbox)"""
+        """
+        Gestisce l'evento di spostamento file (quando un file viene copiato/spostato in inbox).
+        
+        IMPORTANTE: _process_pdf() viene SEMPRE eseguito in thread daemon separato
+        per NON bloccare mai il watchdog filesystem. Operazioni pesanti sono accettabili.
+        """
         # Filtra SOLO file PDF (non directory)
         if event.is_directory:
             return
@@ -328,10 +356,12 @@ class DDTHandler(FileSystemEventHandler):
         if not event.dest_path.lower().endswith(".pdf"):
             return
         
-        # Usa un thread separato per non bloccare il watchdog
+        # Usa un thread separato per non bloccare il watchdog (NON-BLOCCANTE)
         # REGOLA FERREA: daemon=True per permettere shutdown veloce
+        logger.debug(f"📄 [WATCHDOG] Evento on_moved: {Path(event.dest_path).name}, avvio thread processing...")
         thread = threading.Thread(target=self._process_pdf, args=(event.dest_path,), daemon=True)
         thread.start()
+        logger.debug(f"✅ [WATCHDOG] Thread processing avviato per: {Path(event.dest_path).name}")
     
     def on_modified(self, event):
         """IGNORA completamente gli eventi modified per evitare loop"""
@@ -340,15 +370,21 @@ class DDTHandler(FileSystemEventHandler):
         return
 
 def start_watcher_background(observer: Observer):
-    """Avvia il watcher in background"""
+    """
+    Avvia il watcher in background.
+    
+    IMPORTANTE: observer.start() è NON-BLOCCANTE (watchdog usa thread interni).
+    Questa funzione viene eseguita in un thread daemon separato per sicurezza.
+    """
+    logger.info("👀 [WATCHDOG] Avvio watchdog observer...")
     try:
         observer.start()
         from app.paths import get_inbox_dir
         inbox_path = get_inbox_dir()
         print(f"👀 Watchdog attivo su {inbox_path} - I file PDF vengono processati automaticamente")
-        logger.info(f"Watchdog avviato e monitora: {inbox_path}")
+        logger.info(f"✅ [WATCHDOG] Watchdog avviato e monitora: {inbox_path}")
     except Exception as e:
-        logger.error(f"❌ Errore nell'avvio del watchdog: {e}", exc_info=True)
+        logger.error(f"❌ [WATCHDOG] Errore nell'avvio del watchdog: {e}", exc_info=True)
         print(f"❌ Errore nell'avvio del watchdog: {e}")
 
 @asynccontextmanager
@@ -363,22 +399,28 @@ async def lifespan(app: FastAPI):
     
     # Sposta operazioni lunghe in thread daemon (NON bloccanti)
     def init_background_tasks():
-        """Inizializza task in background (migrazione, layout models, controllo STUCK)"""
+        """Inizializza task in background (migrazione, layout models, controllo STUCK, cleanup coda)"""
+        logger.info("🚀 [BACKGROUND_TASKS] Avvio task iniziali in background...")
+        
         try:
             # Migra documenti READY (deprecato) a READY_FOR_REVIEW per backward compatibility
+            logger.info("🔄 [BACKGROUND_TASKS] Avvio migrazione stati...")
             from app.processed_documents import migrate_ready_to_ready_for_review
             migrated_count = migrate_ready_to_ready_for_review()
             if migrated_count > 0:
-                logger.info(f"🔄 Migrazione stati completata: {migrated_count} documento(i) migrato(i)")
+                logger.info(f"✅ [BACKGROUND_TASKS] Migrazione stati completata: {migrated_count} documento(i) migrato(i)")
+            else:
+                logger.info("✅ [BACKGROUND_TASKS] Migrazione stati: nessun documento da migrare")
         except Exception as e:
-            logger.warning(f"⚠️ Errore migrazione stati: {e}")
+            logger.error(f"❌ [BACKGROUND_TASKS] Errore migrazione stati: {e}", exc_info=True)
         
         try:
             # Carica layout models all'avvio per loggare disponibilità
+            logger.info("📐 [BACKGROUND_TASKS] Avvio caricamento layout models...")
             from app.layout_rules.manager import load_layout_rules
             rules = load_layout_rules()
             if rules:
-                logger.info(f"📐 Layout models disponibili all'avvio: {len(rules)} modello(i)")
+                logger.info(f"✅ [BACKGROUND_TASKS] Layout models disponibili: {len(rules)} modello(i)")
                 # Log per mittente
                 from app.layout_rules.manager import normalize_sender
                 sender_counts = {}
@@ -387,26 +429,47 @@ async def lifespan(app: FastAPI):
                     sender_norm = normalize_sender(supplier)
                     sender_counts[sender_norm] = sender_counts.get(sender_norm, 0) + 1
                 for sender_norm, count in sender_counts.items():
-                    logger.info(f"   📦 Loaded {count} layout model(s) for sender: {sender_norm}")
+                    logger.info(f"   📦 [BACKGROUND_TASKS] Loaded {count} layout model(s) for sender: {sender_norm}")
             else:
-                logger.info("📐 Nessun layout model disponibile all'avvio")
+                logger.info("✅ [BACKGROUND_TASKS] Nessun layout model disponibile")
         except Exception as e:
-            logger.warning(f"⚠️ Errore caricamento layout models all'avvio: {e}")
+            logger.error(f"❌ [BACKGROUND_TASKS] Errore caricamento layout models: {e}", exc_info=True)
         
         try:
             # Esegui un controllo iniziale all'avvio (in background)
+            logger.info("🔍 [BACKGROUND_TASKS] Avvio controllo iniziale STUCK...")
             from app.processed_documents import check_and_mark_stuck_documents
             initial_stuck = check_and_mark_stuck_documents()
             if initial_stuck > 0:
-                logger.info(f"🔍 Controllo iniziale STUCK: {initial_stuck} documento(i) già bloccato(i)")
+                logger.info(f"✅ [BACKGROUND_TASKS] Controllo iniziale STUCK: {initial_stuck} documento(i) già bloccato(i)")
+            else:
+                logger.info("✅ [BACKGROUND_TASKS] Controllo iniziale STUCK: nessun documento bloccato")
         except Exception as e:
-            logger.warning(f"⚠️ Errore controllo iniziale STUCK: {e}")
+            logger.error(f"❌ [BACKGROUND_TASKS] Errore controllo iniziale STUCK: {e}", exc_info=True)
+        
+        try:
+            # Carica e pulisci coda watchdog (in background)
+            logger.info("📋 [BACKGROUND_TASKS] Avvio caricamento e pulizia coda watchdog...")
+            from app.watchdog_queue import _load_queue, cleanup_old_items
+            _load_queue()
+            removed_count = cleanup_old_items()
+            if removed_count > 0:
+                logger.info(f"✅ [BACKGROUND_TASKS] Pulizia coda watchdog: {removed_count} elemento(i) rimosso(i)")
+            else:
+                logger.info("✅ [BACKGROUND_TASKS] Pulizia coda watchdog: nessun elemento da rimuovere")
+        except Exception as e:
+            logger.error(f"❌ [BACKGROUND_TASKS] Errore caricamento/pulizia coda watchdog: {e}", exc_info=True)
+        
+        logger.info("✅ [BACKGROUND_TASKS] Tutti i task iniziali completati")
     
     # Avvia task iniziali in thread daemon (NON bloccante)
-    threading.Thread(target=init_background_tasks, daemon=True).start()
-    logger.info("🚀 Task iniziali avviati in background (migrazione, layout models, controllo STUCK)")
+    init_thread = threading.Thread(target=init_background_tasks, daemon=True)
+    init_thread.start()
+    logger.info("🚀 [LIFESPAN] Task iniziali avviati in background thread (migrazione, layout models, controllo STUCK, cleanup coda)")
     
     # Startup - avvia il watchdog in background
+    # IMPORTANTE: observer.start() è NON-BLOCCANTE, ma lo eseguiamo comunque in thread daemon per sicurezza
+    logger.info("👀 [LIFESPAN] Configurazione watchdog filesystem...")
     global _global_observer
     observer = Observer()
     _global_observer = observer  # Salva riferimento globale per shutdown handler
@@ -417,9 +480,9 @@ async def lifespan(app: FastAPI):
         # REGOLA FERREA: daemon=True per permettere shutdown veloce
         watcher_thread = threading.Thread(target=start_watcher_background, args=(observer,), daemon=True)
         watcher_thread.start()
-        logger.info(f"👀 Watchdog configurato per monitorare: {inbox_path}")
+        logger.info(f"✅ [LIFESPAN] Watchdog configurato per monitorare: {inbox_path}")
     except Exception as e:
-        logger.error(f"❌ Errore nella configurazione del watchdog: {e}", exc_info=True)
+        logger.error(f"❌ [LIFESPAN] Errore nella configurazione del watchdog: {e}", exc_info=True)
         _global_observer = None
     
     # Startup - avvia cleanup periodico per documenti STUCK
@@ -427,35 +490,45 @@ async def lifespan(app: FastAPI):
     _cleanup_shutdown_flag.clear()  # Reset flag all'avvio
     
     def stuck_cleanup_loop():
-        """Loop periodico per controllare e marcare documenti PROCESSING bloccati come STUCK"""
+        """
+        Loop periodico per controllare e marcare documenti PROCESSING bloccati come STUCK.
+        
+        IMPORTANTE: Eseguito in thread daemon separato, NON blocca mai il main thread.
+        Usa Event.wait() invece di time.sleep() per permettere interruzione immediata.
+        """
         import time
         from app.processed_documents import check_and_mark_stuck_documents
         # Esegui cleanup ogni 5 minuti
         cleanup_interval = 300  # 5 minuti
-        logger.info("🔍 Cleanup loop STUCK avviato")
+        logger.info("🔍 [CLEANUP_LOOP] Cleanup loop STUCK avviato (thread daemon)")
         
         while not _cleanup_shutdown_flag.is_set():
             try:
-                # Usa wait invece di sleep per permettere interruzione immediata
+                # Usa wait invece di sleep per permettere interruzione immediata (NON-BLOCCANTE)
                 if _cleanup_shutdown_flag.wait(timeout=cleanup_interval):
                     # Flag di shutdown impostato, esci dal loop
-                    logger.info("🧹 Cleanup loop STUCK: shutdown richiesto, terminazione...")
+                    logger.info("🧹 [CLEANUP_LOOP] Shutdown richiesto, terminazione...")
                     break
                 
                 # Esegui cleanup solo se shutdown non richiesto
                 if not _cleanup_shutdown_flag.is_set():
+                    logger.debug("🔍 [CLEANUP_LOOP] Esecuzione controllo STUCK...")
                     stuck_count = check_and_mark_stuck_documents()
                     if stuck_count > 0:
-                        logger.info(f"🔍 Cleanup STUCK: {stuck_count} documento(i) marcato(i) come STUCK")
+                        logger.info(f"✅ [CLEANUP_LOOP] Cleanup STUCK: {stuck_count} documento(i) marcato(i) come STUCK")
+                    else:
+                        logger.debug("✅ [CLEANUP_LOOP] Nessun documento STUCK trovato")
             except Exception as e:
-                logger.error(f"❌ Errore nel cleanup STUCK: {e}", exc_info=True)
+                logger.error(f"❌ [CLEANUP_LOOP] Errore nel cleanup STUCK: {e}", exc_info=True)
         
-        logger.info("✅ Cleanup loop STUCK terminato")
+        logger.info("✅ [CLEANUP_LOOP] Cleanup loop STUCK terminato")
     
     # REGOLA FERREA: daemon=True per permettere shutdown veloce
+    # IMPORTANTE: Loop cleanup in thread daemon separato, NON blocca mai il main thread
+    logger.info("🔍 [LIFESPAN] Avvio cleanup thread STUCK...")
     _cleanup_thread = threading.Thread(target=stuck_cleanup_loop, daemon=True)
     _cleanup_thread.start()
-    logger.info("🔍 Cleanup periodico STUCK avviato (controllo ogni 5 minuti)")
+    logger.info("✅ [LIFESPAN] Cleanup periodico STUCK avviato (controllo ogni 5 minuti, thread daemon)")
     
     # Startup completato - yield immediato (NON bloccante)
     logger.info("✅ [LIFESPAN] Startup completato, yield a uvicorn")

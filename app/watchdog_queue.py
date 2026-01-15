@@ -320,7 +320,7 @@ def cleanup_old_items() -> int:
         return removed_count
 
 
-# Carica la coda all'avvio e pulisci elementi vecchi
-_load_queue()
-cleanup_old_items()
+# FIX: NON caricare la coda all'import (bloccante)
+# La coda verrà caricata lazy al primo accesso o nello startup FastAPI
+# cleanup_old_items() verrà chiamato nello startup in thread daemon
 
