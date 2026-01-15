@@ -148,23 +148,28 @@ def get_pending_items() -> List[Dict[str, Any]]:
                 ):
                     continue
                 
-                # Se extraction_mode non è già presente nell'item, prova a recuperarlo dai metadata
+                # FIX: Recupera extraction_mode dai metadata SOLO se mancante nell'item (una sola volta)
+                # Se extraction_mode viene recuperato dai metadata, calcola i flag UNA SOLA VOLTA (solo in questo caso)
+                # NON ricalcolare mai i flag se extraction_mode è già presente nell'item (sono fatti storici congelati)
                 if "extraction_mode" not in item or item.get("extraction_mode") is None:
                     metadata = get_document_metadata(file_hash)
                     if metadata and metadata.get("extraction_mode"):
-                        item["extraction_mode"] = metadata["extraction_mode"]
+                        # Recupera extraction_mode dai metadata e salvalo nell'item (una sola volta)
+                        recovered_extraction_mode = metadata["extraction_mode"]
+                        item["extraction_mode"] = recovered_extraction_mode
+                        
+                        # Se i flag mancano, calcolali UNA SOLA VOLTA dal extraction_mode recuperato
+                        # (solo per backward compatibility con item vecchi creati prima del fix)
+                        if "suggest_create_layout" not in item:
+                            item["suggest_create_layout"] = (recovered_extraction_mode == "AI_FALLBACK")
+                        if "has_layout_model" not in item:
+                            item["has_layout_model"] = (recovered_extraction_mode in ("LAYOUT_MODEL", "HYBRID_LAYOUT_AI"))
+                        
                         _save_queue()
+                    # Se non trovato nei metadata, lascia extraction_mode = None (NON usare fallback)
                 
-                # Assicura che extraction_mode sia sempre presente (fallback a AI_FALLBACK)
-                extraction_mode = item.get("extraction_mode", "AI_FALLBACK")
-                
-                # Ricalcola flag layout model se mancanti
-                if "suggest_create_layout" not in item:
-                    item["suggest_create_layout"] = (extraction_mode == "AI_FALLBACK")
-                    _save_queue()
-                if "has_layout_model" not in item:
-                    item["has_layout_model"] = (extraction_mode in ("LAYOUT_MODEL", "HYBRID_LAYOUT_AI"))
-                    _save_queue()
+                # I flag has_layout_model e suggest_create_layout DEVONO essere letti solo dall'item persistito
+                # NON vengono mai ricalcolati se extraction_mode è già presente (sono fatti storici congelati al momento della creazione)
             
             pending_items.append(item)
         
