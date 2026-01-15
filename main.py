@@ -119,12 +119,12 @@ def stop_cleanup_thread_safely():
 def shutdown_handler(signum, frame):
     """
     Gestore per segnali di shutdown (SIGTERM, SIGINT).
-    Ferma tutti i thread/task e termina il processo correttamente.
+    Ferma tutti i thread/task ma NON termina il processo (uvicorn gestisce la terminazione).
     """
-    signal_name = "SIGTERM" if signum == signal.SIGTERM else "SIGINT"
+    signal_name = signal.Signals(signum).name if hasattr(signal.Signals, '__call__') else ("SIGTERM" if signum == signal.SIGTERM else "SIGINT")
     # Log immediato per verificare che il segnale arrivi
-    print(f"\n⛔ SIGTERM/SIGINT RICEVUTO ({signal_name}) - Inizio shutdown...", flush=True)
-    logger.critical(f"⛔ SIGTERM/SIGINT RICEVUTO ({signal_name}) - Inizio shutdown...")
+    print(f"\n⛔ SIGTERM/SIGINT RICEVUTO ({signal_name}) - Inizio shutdown thread/observer...", flush=True)
+    logger.critical(f"⛔ SIGTERM/SIGINT RICEVUTO ({signal_name}) - Inizio shutdown thread/observer...")
     
     try:
         # Ferma cleanup thread PRIMA del watchdog (ordine inverso rispetto startup)
@@ -142,16 +142,9 @@ def shutdown_handler(signum, frame):
     except Exception as e:
         logger.error(f"❌ Errore durante shutdown watchdog: {e}", exc_info=True)
     
-    # Log finale e exit FORZATO
-    logger.critical("✅ [SHUTDOWN] Shutdown completato, terminazione processo FORZATA")
-    print("✅ [SHUTDOWN] Terminazione processo...", flush=True)
-    
-    # Forza terminazione immediata (os._exit bypassa cleanup Python)
-    os._exit(0)
-    
-    # Fallback: se os._exit non termina il processo (non dovrebbe mai arrivare qui)
-    logger.info("💀 Forcing process exit")
-    sys.exit(0)
+    # Log finale - FINE HANDLER (uvicorn gestisce la terminazione del processo)
+    logger.critical("✅ [SHUTDOWN] Thread/observer fermati, uvicorn gestirà la terminazione del processo")
+    print("✅ [SHUTDOWN] Thread/observer fermati", flush=True)
 
 
 # Registra handler per segnali di shutdown (SIGTERM da systemd, SIGINT da Ctrl+C)
