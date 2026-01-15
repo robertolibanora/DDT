@@ -483,7 +483,7 @@ def extract_from_pdf(file_path: str, template_id: Optional[str] = None) -> Dict[
             else:
                 logger.info(f"❌ LAYOUT MODEL SKIPPED: nessun match trovato nella pre-detection")
                 logger.info(f"   Motivo: nessun layout model ha superato la soglia di similarity")
-                extraction_mode = "AI_FALLBACK"
+                extraction_mode = "AI_FALLBACK_FULL"
         
         # HARD FAILOVER: Se layout model matcha o è forzato, USA SOLO BOX EXTRACTION, NON chiamare LLM
         if layout_rule:
@@ -539,8 +539,17 @@ def extract_from_pdf(file_path: str, template_id: Optional[str] = None) -> Dict[
                     # Valida usando Pydantic
                     ddt_data = DDTData(**normalized_data)
                     result = ddt_data.model_dump()
-                    # Aggiungi extraction_mode al risultato per audit trail
+                    
+                    # Imposta extraction_mode corretto: template forzato senza AI → STRICT
+                    if extraction_mode == "LAYOUT_MODEL_FORCED":
+                        extraction_mode = "LAYOUT_MODEL_FORCED_STRICT"
+                    elif extraction_mode == "LAYOUT_MODEL":
+                        # Template matchato senza AI → mantieni LAYOUT_MODEL
+                        pass
+                    
+                    # Aggiungi extraction_mode e ai_fallback_used al risultato per audit trail
                     result["_extraction_mode"] = extraction_mode
+                    result["_ai_fallback_used"] = False  # Nessun AI fallback usato
                     logger.info(f"✅ Dati validati con successo (estrazione box)")
                     logger.info(f"📊 Extraction mode used: {extraction_mode}")
                     logger.info(f"📐 LAYOUT MODEL APPLIED: '{layout_rule_name}' - Estrazione completata senza AI")
@@ -558,9 +567,9 @@ def extract_from_pdf(file_path: str, template_id: Optional[str] = None) -> Dict[
                     if missing_fields:
                         # Campi mancanti → fallback AI mirato SOLO se almeno 1 campo estratto
                         if extracted_count == 0:
-                            # Layout estrae 0 campi → AI_FALLBACK classico
-                            logger.warning(f"⚠️ Layout model '{layout_rule_name}' estratto 0 campi → fallback AI classico")
-                            extraction_mode = "AI_FALLBACK"
+                            # Layout estrae 0 campi → AI_FALLBACK_FULL (questo caso non dovrebbe mai verificarsi)
+                            logger.warning(f"⚠️ Layout model '{layout_rule_name}' estratto 0 campi → fallback AI completo")
+                            extraction_mode = "AI_FALLBACK_FULL"
                             # Continua con AI extraction completa (non siamo qui, ma per sicurezza)
                             # NOTA: Questo caso non dovrebbe mai verificarsi perché già gestito sopra (riga 278)
                             raise ValueError(
@@ -604,14 +613,23 @@ def extract_from_pdf(file_path: str, template_id: Optional[str] = None) -> Dict[
                             ddt_data = DDTData(**hybrid_data)
                             result = ddt_data.model_dump()
                             
-                            # Se template era forzato, mantieni LAYOUT_MODEL_FORCED, altrimenti HYBRID_LAYOUT_AI
-                            if extraction_mode != "LAYOUT_MODEL_FORCED":
+                            # Imposta extraction_mode corretto quando viene usato AI fallback
+                            if extraction_mode == "LAYOUT_MODEL_FORCED":
+                                # Template forzato con AI fallback
+                                extraction_mode = "LAYOUT_MODEL_FORCED_WITH_AI_FALLBACK"
+                                logger.warning(f"⚠️ Template forzato '{layout_rule_name}' ha usato AI fallback per completare campi mancanti")
+                            elif extraction_mode == "LAYOUT_MODEL":
+                                # Template matchato con AI fallback
                                 extraction_mode = "HYBRID_LAYOUT_AI"
-                            # Aggiungi extraction_mode al risultato per audit trail
+                            
+                            # Aggiungi extraction_mode e ai_fallback_used al risultato per audit trail
                             result["_extraction_mode"] = extraction_mode
+                            result["_ai_fallback_used"] = True  # AI fallback usato per completare campi mancanti
+                            result["_ai_fallback_fields"] = list(ai_missing_data.keys())  # Campi completati via AI
                             logger.info(f"✅ Documento completato con strategia {extraction_mode}")
                             logger.info(f"📊 Extraction mode used: {extraction_mode}")
-                            logger.info(f"📐 Layout model '{layout_rule_name}': {extracted_count} campi + AI: {len(ai_missing_data)} campi")
+                            logger.info(f"🤖 AI fallback usato per campi: {list(ai_missing_data.keys())}")
+                            logger.info(f"📐 Layout model '{layout_rule_name}': {extracted_count} campi da box + {len(ai_missing_data)} campi da AI")
                             return result
                             
                         except ValueError as ai_error:
@@ -630,10 +648,16 @@ def extract_from_pdf(file_path: str, template_id: Optional[str] = None) -> Dict[
                             logger.error(f"❌ {error_msg}", exc_info=True)
                             raise ValueError(error_msg) from ai_error
                     else:
-                        # Campi presenti ma invalidi → fallback AI solo per correzione
+                        # Campi presenti ma invalidi → fallback AI per correzione
                         logger.warning(f"⚠️ Campi invalidi dopo box extraction: {invalid_fields}")
                         logger.warning(f"   Fallback ad AI per correzione campi invalidi")
-                        extraction_mode = "AI_FALLBACK"
+                        # Se template era forzato, usa LAYOUT_MODEL_FORCED_WITH_AI_FALLBACK, altrimenti HYBRID_LAYOUT_AI
+                        if extraction_mode == "LAYOUT_MODEL_FORCED":
+                            extraction_mode = "LAYOUT_MODEL_FORCED_WITH_AI_FALLBACK"
+                        elif extraction_mode == "LAYOUT_MODEL":
+                            extraction_mode = "HYBRID_LAYOUT_AI"
+                        else:
+                            extraction_mode = "AI_FALLBACK_FULL"
                         # Continua con AI extraction per correggere campi invalidi
                         
             except ValueError as ve:
@@ -905,16 +929,18 @@ def extract_from_pdf(file_path: str, template_id: Optional[str] = None) -> Dict[
         
         # Assicura che extraction_mode sia impostato
         if extraction_mode is None:
-            extraction_mode = "AI_FALLBACK"
+            extraction_mode = "AI_FALLBACK_FULL"
         
         # Valida usando Pydantic
         try:
             ddt_data = DDTData(**normalized_data)
             result = ddt_data.model_dump()
-            # Aggiungi extraction_mode al risultato per audit trail
+            # Aggiungi extraction_mode e ai_fallback_used al risultato per audit trail
             result["_extraction_mode"] = extraction_mode
+            result["_ai_fallback_used"] = True  # Solo AI usato (nessun layout model)
             logger.info(f"✅ Dati validati con successo")
             logger.info(f"📊 Extraction mode used: {extraction_mode}")
+            logger.info(f"🤖 Estrazione completata usando solo AI (nessun layout model)")
             return result
         except ValidationError as e:
             # Estrai un messaggio più chiaro dagli errori di validazione Pydantic

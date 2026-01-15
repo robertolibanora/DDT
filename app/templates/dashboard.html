@@ -752,7 +752,9 @@
                                             newItem.file_name,
                                             newItem.extraction_mode || null,
                                             newItem.suggest_create_layout || false,
-                                            newItem.has_layout_model !== undefined ? newItem.has_layout_model : null
+                                            newItem.has_layout_model !== undefined ? newItem.has_layout_model : null,
+                                            newItem.ai_fallback_used || false,
+                                            newItem.ai_fallback_fields || []
                                         );
                                     } else if (window.previewModal) {
                                         // Mostra modal anche senza dati estratti (QUEUED/PROCESSING)
@@ -763,7 +765,9 @@
                                             newItem.file_name,
                                             null, // extractionMode
                                             false, // suggestCreateLayout
-                                            null  // hasLayoutModel
+                                            null,  // hasLayoutModel
+                                            false, // aiFallbackUsed
+                                            []     // aiFallbackFields
                                         );
                                     }
                                 },
@@ -854,7 +858,9 @@
                     item.file_name,
                     item.extraction_mode || null,
                     item.suggest_create_layout || false,
-                    item.has_layout_model !== undefined ? item.has_layout_model : null
+                    item.has_layout_model !== undefined ? item.has_layout_model : null,
+                    item.ai_fallback_used || false,
+                    item.ai_fallback_fields || []
                 );
                 
             } catch (error) {

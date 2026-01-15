@@ -599,13 +599,18 @@ async def apply_model(
             logger.info(f"🎯 Applicazione template forzato dall'operatore: '{model_id}' per mittente '{supplier}'")
             extracted_data = extract_from_pdf(file_path, template_id=model_id)
             
-            # Estrai extraction_mode dal risultato
+            # Estrai extraction_mode e ai_fallback_used dal risultato
             extraction_mode = extracted_data.pop("_extraction_mode", None)
-            logger.info(f"✅ Estrazione completata con successo: extraction_mode={extraction_mode}")
+            ai_fallback_used = extracted_data.pop("_ai_fallback_used", False)
+            ai_fallback_fields = extracted_data.pop("_ai_fallback_fields", [])
+            
+            if ai_fallback_used:
+                logger.warning(f"⚠️ AI fallback utilizzato durante estrazione: extraction_mode={extraction_mode}, campi={ai_fallback_fields}")
+            logger.info(f"✅ Estrazione completata con successo: extraction_mode={extraction_mode}, ai_fallback_used={ai_fallback_used}")
             
             # FASE 2: Aggiornamento watchdog queue
             # FIX FASE 2: Aggiorna la coda watchdog con i nuovi dati estratti
-            queue_updated = update_queue_item_by_hash(file_hash, extracted_data, extraction_mode)
+            queue_updated = update_queue_item_by_hash(file_hash, extracted_data, extraction_mode, ai_fallback_used=ai_fallback_used, ai_fallback_fields=ai_fallback_fields)
             
             if not queue_updated:
                 # CRITICO: La coda non è stata aggiornata - i dati vecchi sono ancora visibili
@@ -669,7 +674,9 @@ async def apply_model(
                 "id": model_id,
                 "name": supplier
             },
-            "extraction_mode": extraction_mode
+            "extraction_mode": extraction_mode,
+            "ai_fallback_used": ai_fallback_used,
+            "ai_fallback_fields": ai_fallback_fields if ai_fallback_used else []
         })
     except HTTPException:
         raise

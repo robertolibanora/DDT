@@ -254,7 +254,9 @@
                                     data.file_name,
                                     null, // extractionMode
                                     false, // suggestCreateLayout
-                                    null  // hasLayoutModel
+                                    null,  // hasLayoutModel
+                                    false, // aiFallbackUsed
+                                    []     // aiFallbackFields
                                 );
                             } catch (modalError) {
                                 console.error('Errore durante show modal QUEUED:', modalError);
@@ -285,7 +287,9 @@
                                 data.file_name,
                                 data.extraction_mode || null,
                                 data.suggest_create_layout || false,
-                                data.has_layout_model !== undefined ? data.has_layout_model : null
+                                data.has_layout_model !== undefined ? data.has_layout_model : null,
+                                data.ai_fallback_used || false,
+                                data.ai_fallback_fields || []
                             );
                             console.log('Modal.show chiamato con successo');
                             

@@ -126,7 +126,11 @@ class DDTHandler(FileSystemEventHandler):
             from app.extract import extract_from_pdf, generate_preview_png
             data = extract_from_pdf(file_path)
             extraction_mode = data.pop("_extraction_mode", None)  # Estrai extraction_mode dal risultato
-            logger.info(f"✅ [WORKER] [PROCESS_PDF] Estrazione dati completata: {Path(file_path).name} (mode={extraction_mode})")
+            ai_fallback_used = data.pop("_ai_fallback_used", False)  # Estrai ai_fallback_used dal risultato
+            ai_fallback_fields = data.pop("_ai_fallback_fields", [])  # Estrai ai_fallback_fields dal risultato
+            if ai_fallback_used:
+                logger.warning(f"⚠️ [WORKER] [PROCESS_PDF] AI fallback utilizzato: campi={ai_fallback_fields}")
+            logger.info(f"✅ [WORKER] [PROCESS_PDF] Estrazione dati completata: {Path(file_path).name} (mode={extraction_mode}, ai_fallback_used={ai_fallback_used})")
             
             # Verifica se questo numero documento è già in Excel (controllo finale)
             try:
@@ -158,9 +162,9 @@ class DDTHandler(FileSystemEventHandler):
             except Exception as e:
                 logger.warning(f"⚠️ [WORKER] [PROCESS_PDF] Errore generazione PNG anteprima: {e}")
             
-            # Aggiungi alla coda per l'anteprima (con extraction_mode)
+            # Aggiungi alla coda per l'anteprima (con extraction_mode e ai_fallback_used)
             logger.info(f"📋 [WORKER] [PROCESS_PDF] Aggiunta alla coda watchdog: {Path(file_path).name}")
-            queue_id = add_to_queue(file_path, data, pdf_base64, doc_hash, extraction_mode)
+            queue_id = add_to_queue(file_path, data, pdf_base64, doc_hash, extraction_mode, ai_fallback_used=ai_fallback_used, ai_fallback_fields=ai_fallback_fields)
             logger.info(f"✅ [WORKER] [PROCESS_PDF] DDT aggiunto alla coda: queue_id={queue_id} hash={doc_hash[:16]}... numero={data.get('numero_documento', 'N/A')}")
             
             # Marca come READY_FOR_REVIEW quando tutto è pronto (dati estratti + PNG + coda)
@@ -473,7 +477,11 @@ def process_queued_document(doc_info: Dict[str, Any]) -> None:
         from app.extract import extract_from_pdf, generate_preview_png
         data = extract_from_pdf(file_path)
         extraction_mode = data.pop("_extraction_mode", None)
-        logger.info(f"✅ [WORKER] [PROCESS_QUEUED] Estrazione dati completata: {file_name} (mode={extraction_mode})")
+        ai_fallback_used = data.pop("_ai_fallback_used", False)
+        ai_fallback_fields = data.pop("_ai_fallback_fields", [])
+        if ai_fallback_used:
+            logger.warning(f"⚠️ [WORKER] [PROCESS_QUEUED] AI fallback utilizzato: campi={ai_fallback_fields}")
+        logger.info(f"✅ [WORKER] [PROCESS_QUEUED] Estrazione dati completata: {file_name} (mode={extraction_mode}, ai_fallback_used={ai_fallback_used})")
         
         # Verifica se questo numero documento è già in Excel (controllo finale)
         try:
@@ -503,9 +511,9 @@ def process_queued_document(doc_info: Dict[str, Any]) -> None:
         except Exception as e:
             logger.warning(f"⚠️ [WORKER] [PROCESS_QUEUED] Errore generazione PNG anteprima: {e}")
         
-        # Aggiungi alla coda per l'anteprima (con extraction_mode)
+        # Aggiungi alla coda per l'anteprima (con extraction_mode e ai_fallback_used)
         logger.info(f"📋 [WORKER] [PROCESS_QUEUED] Aggiunta alla coda watchdog: {file_name}")
-        queue_id = add_to_queue(file_path, data, pdf_base64, doc_hash, extraction_mode)
+        queue_id = add_to_queue(file_path, data, pdf_base64, doc_hash, extraction_mode, ai_fallback_used=ai_fallback_used, ai_fallback_fields=ai_fallback_fields)
         logger.info(f"✅ [WORKER] [PROCESS_QUEUED] DDT aggiunto alla coda: queue_id={queue_id} hash={doc_hash[:16]}... numero={data.get('numero_documento', 'N/A')}")
         
         # Marca come READY_FOR_REVIEW quando tutto è pronto

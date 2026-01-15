@@ -644,6 +644,75 @@
     }
 }
 
+/* Banner warning AI fallback */
+.ai-fallback-warning-banner {
+    margin-top: 20px;
+    padding: 20px 24px;
+    background: linear-gradient(135deg, #fff3cd 0%, #ffe69c 100%);
+    border: 3px solid #ffc107;
+    border-radius: var(--radius-md);
+    box-shadow: 0 4px 12px rgba(255, 193, 7, 0.3);
+    animation: slideDown 0.3s ease-out;
+}
+
+.ai-fallback-warning-content {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+}
+
+.ai-fallback-warning-icon {
+    font-size: 2em;
+    flex-shrink: 0;
+    line-height: 1;
+}
+
+.ai-fallback-warning-text {
+    flex: 1;
+    min-width: 200px;
+}
+
+.ai-fallback-warning-title {
+    font-weight: 700;
+    color: #856404;
+    margin-bottom: 8px;
+    font-size: 1em;
+    line-height: 1.4;
+}
+
+.ai-fallback-warning-subtitle {
+    color: #856404;
+    font-size: 0.9375em;
+    margin-bottom: 8px;
+    line-height: 1.5;
+}
+
+.ai-fallback-warning-subtitle #ai-fallback-fields-list {
+    font-weight: 700;
+    color: #b45309;
+}
+
+.ai-fallback-warning-note {
+    color: #856404;
+    font-size: 0.875em;
+    font-weight: 600;
+    font-style: italic;
+    margin-top: 8px;
+    line-height: 1.5;
+}
+
+@media (max-width: 768px) {
+    .ai-fallback-warning-content {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+    
+    .ai-fallback-warning-icon {
+        font-size: 1.5em;
+    }
+}
+
 #layout-trainer-link {
     display: inline-block;
     padding: 12px 20px;

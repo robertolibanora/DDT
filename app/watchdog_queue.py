@@ -55,7 +55,7 @@ def _save_queue():
         logger.warning(f"Errore salvataggio coda: {e}")
 
 
-def add_to_queue(file_path: str, extracted_data: Dict[str, Any], pdf_base64: str, file_hash: str, extraction_mode: Optional[str] = None) -> str:
+def add_to_queue(file_path: str, extracted_data: Dict[str, Any], pdf_base64: str, file_hash: str, extraction_mode: Optional[str] = None, ai_fallback_used: bool = False, ai_fallback_fields: Optional[List[str]] = None) -> str:
     """
     Aggiunge un PDF alla coda per l'anteprima
     
@@ -64,7 +64,9 @@ def add_to_queue(file_path: str, extracted_data: Dict[str, Any], pdf_base64: str
         extracted_data: Dati estratti dall'AI
         pdf_base64: PDF convertito in base64
         file_hash: Hash del file
-        extraction_mode: Modalità di estrazione (LAYOUT_MODEL, HYBRID_LAYOUT_AI, AI_FALLBACK)
+        extraction_mode: Modalità di estrazione (LAYOUT_MODEL, HYBRID_LAYOUT_AI, AI_FALLBACK, ecc.)
+        ai_fallback_used: True se è stato usato AI fallback durante l'estrazione
+        ai_fallback_fields: Lista di campi completati tramite AI fallback (opzionale)
         
     Returns:
         ID della voce in coda
@@ -75,10 +77,16 @@ def add_to_queue(file_path: str, extracted_data: Dict[str, Any], pdf_base64: str
         queue_id = f"{file_hash}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
         # Calcola flag per suggerimento layout model
-        # suggest_create_layout: true solo se extraction_mode == AI_FALLBACK
-        # has_layout_model: false quando extraction_mode == AI_FALLBACK (più esplicito)
-        suggest_create_layout = (extraction_mode == "AI_FALLBACK")
-        has_layout_model = (extraction_mode in ("LAYOUT_MODEL", "HYBRID_LAYOUT_AI"))
+        # suggest_create_layout: true solo se extraction_mode == AI_FALLBACK_FULL
+        # has_layout_model: true se extraction_mode include layout model
+        suggest_create_layout = (extraction_mode == "AI_FALLBACK_FULL")
+        has_layout_model = (extraction_mode in ("LAYOUT_MODEL", "LAYOUT_MODEL_FORCED_STRICT", "LAYOUT_MODEL_FORCED_WITH_AI_FALLBACK", "HYBRID_LAYOUT_AI"))
+        
+        # Estrai ai_fallback_used e ai_fallback_fields da extracted_data se presenti
+        if "_ai_fallback_used" in extracted_data:
+            ai_fallback_used = extracted_data.pop("_ai_fallback_used", False)
+        if "_ai_fallback_fields" in extracted_data:
+            ai_fallback_fields = extracted_data.pop("_ai_fallback_fields", [])
         
         queue_item = {
             "id": queue_id,
@@ -90,6 +98,8 @@ def add_to_queue(file_path: str, extracted_data: Dict[str, Any], pdf_base64: str
             "timestamp": datetime.now().isoformat(),
             "processed": False,
             "extraction_mode": extraction_mode,  # Modalità di estrazione
+            "ai_fallback_used": ai_fallback_used,  # Flag: AI fallback utilizzato
+            "ai_fallback_fields": ai_fallback_fields or [],  # Campi completati via AI
             "suggest_create_layout": suggest_create_layout,  # Flag di suggerimento (backward compatibility)
             "has_layout_model": has_layout_model  # Flag esplicito: true se ha layout model
         }
@@ -97,7 +107,7 @@ def add_to_queue(file_path: str, extracted_data: Dict[str, Any], pdf_base64: str
         _watchdog_queue.append(queue_item)
         _save_queue()
         
-        logger.debug(f"PDF aggiunto alla coda watchdog: {queue_id} (extraction_mode={extraction_mode}, suggest_create_layout={suggest_create_layout})")
+        logger.debug(f"PDF aggiunto alla coda watchdog: {queue_id} (extraction_mode={extraction_mode}, ai_fallback_used={ai_fallback_used}, suggest_create_layout={suggest_create_layout})")
         return queue_id
 
 
@@ -161,9 +171,15 @@ def get_pending_items() -> List[Dict[str, Any]]:
                         # Se i flag mancano, calcolali UNA SOLA VOLTA dal extraction_mode recuperato
                         # (solo per backward compatibility con item vecchi creati prima del fix)
                         if "suggest_create_layout" not in item:
-                            item["suggest_create_layout"] = (recovered_extraction_mode == "AI_FALLBACK")
+                            item["suggest_create_layout"] = (recovered_extraction_mode in ("AI_FALLBACK", "AI_FALLBACK_FULL"))
                         if "has_layout_model" not in item:
-                            item["has_layout_model"] = (recovered_extraction_mode in ("LAYOUT_MODEL", "HYBRID_LAYOUT_AI"))
+                            item["has_layout_model"] = (recovered_extraction_mode in ("LAYOUT_MODEL", "LAYOUT_MODEL_FORCED_STRICT", "LAYOUT_MODEL_FORCED_WITH_AI_FALLBACK", "HYBRID_LAYOUT_AI"))
+                        
+                        # Imposta ai_fallback_used in base al extraction_mode (backward compatibility)
+                        if "ai_fallback_used" not in item:
+                            item["ai_fallback_used"] = (recovered_extraction_mode in ("LAYOUT_MODEL_FORCED_WITH_AI_FALLBACK", "HYBRID_LAYOUT_AI", "AI_FALLBACK", "AI_FALLBACK_FULL"))
+                        if "ai_fallback_fields" not in item:
+                            item["ai_fallback_fields"] = []  # Non possiamo recuperare i campi specifici dai metadata
                         
                         _save_queue()
                     # Se non trovato nei metadata, lascia extraction_mode = None (NON usare fallback)
@@ -260,7 +276,9 @@ def get_item_by_id(queue_id: str) -> Optional[Dict[str, Any]]:
 def update_queue_item_by_hash(
     file_hash: str,
     extracted_data: Dict[str, Any],
-    extraction_mode: Optional[str] = None
+    extraction_mode: Optional[str] = None,
+    ai_fallback_used: bool = False,
+    ai_fallback_fields: Optional[List[str]] = None
 ) -> bool:
     """
     Aggiorna i dati estratti di un elemento nella coda watchdog
@@ -271,6 +289,8 @@ def update_queue_item_by_hash(
         file_hash: Hash del file PDF
         extracted_data: Nuovi dati estratti
         extraction_mode: Nuova modalità di estrazione (opzionale)
+        ai_fallback_used: True se è stato usato AI fallback durante l'estrazione
+        ai_fallback_fields: Lista di campi completati tramite AI fallback (opzionale)
         
     Returns:
         True se aggiornato, False se elemento non trovato
@@ -291,14 +311,18 @@ def update_queue_item_by_hash(
                 if extraction_mode:
                     item["extraction_mode"] = extraction_mode
                     # Ricalcola i flag basati sul nuovo extraction_mode
-                    item["suggest_create_layout"] = (extraction_mode == "AI_FALLBACK")
-                    item["has_layout_model"] = (extraction_mode in ("LAYOUT_MODEL", "LAYOUT_MODEL_FORCED", "HYBRID_LAYOUT_AI"))
+                    item["suggest_create_layout"] = (extraction_mode == "AI_FALLBACK_FULL")
+                    item["has_layout_model"] = (extraction_mode in ("LAYOUT_MODEL", "LAYOUT_MODEL_FORCED_STRICT", "LAYOUT_MODEL_FORCED_WITH_AI_FALLBACK", "HYBRID_LAYOUT_AI"))
+                
+                # Aggiorna ai_fallback_used e ai_fallback_fields
+                item["ai_fallback_used"] = ai_fallback_used
+                item["ai_fallback_fields"] = ai_fallback_fields or []
                 
                 # Aggiorna timestamp per indicare che è stato ricalcolato
                 item["last_recalculated"] = datetime.now().isoformat()
                 
                 updated = True
-                logger.info(f"✅ Coda watchdog aggiornata: file_hash={file_hash[:16]}... extraction_mode={extraction_mode or 'N/A'}")
+                logger.info(f"✅ Coda watchdog aggiornata: file_hash={file_hash[:16]}... extraction_mode={extraction_mode or 'N/A'}, ai_fallback_used={ai_fallback_used}")
                 break
         
         if updated:

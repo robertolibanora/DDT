@@ -104,6 +104,20 @@ class PreviewModal {
                                     </button>
                                 </div>
                             </div>
+                            
+                            <!-- Banner warning AI fallback -->
+                            <div id="ai-fallback-warning-banner" class="ai-fallback-warning-banner hidden">
+                                <div class="ai-fallback-warning-content">
+                                    <div class="ai-fallback-warning-icon">⚠️</div>
+                                    <div class="ai-fallback-warning-text">
+                                        <div class="ai-fallback-warning-title">Il modello è stato applicato, ma alcuni campi sono stati completati tramite AI</div>
+                                        <div class="ai-fallback-warning-subtitle">
+                                            Campi completati via AI: <span id="ai-fallback-fields-list"></span>
+                                        </div>
+                                        <div class="ai-fallback-warning-note">Verificare attentamente i dati prima di confermare.</div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
 
                         <!-- Form Dati -->
@@ -438,7 +452,35 @@ class PreviewModal {
                     }
                 }
                 
-                // Aggiorna visibilità banner: modello applicato = nascondi banner
+                // Gestione banner warning AI fallback
+                const aiFallbackUsed = data.ai_fallback_used || false;
+                const aiFallbackFields = data.ai_fallback_fields || [];
+                const aiFallbackBanner = document.getElementById('ai-fallback-warning-banner');
+                const aiFallbackFieldsList = document.getElementById('ai-fallback-fields-list');
+                
+                if (aiFallbackBanner) {
+                    if (aiFallbackUsed && aiFallbackFields && aiFallbackFields.length > 0) {
+                        // Mostra banner warning
+                        aiFallbackBanner.classList.remove('hidden');
+                        if (aiFallbackFieldsList) {
+                            // Formatta lista campi completati via AI
+                            const fieldsLabels = {
+                                'data': 'Data',
+                                'mittente': 'Mittente',
+                                'destinatario': 'Destinatario',
+                                'numero_documento': 'Numero Documento',
+                                'totale_kg': 'Totale Kg'
+                            };
+                            const formattedFields = aiFallbackFields.map(field => fieldsLabels[field] || field).join(', ');
+                            aiFallbackFieldsList.textContent = formattedFields;
+                        }
+                    } else {
+                        // Nascondi banner (modello applicato senza AI fallback)
+                        aiFallbackBanner.classList.add('hidden');
+                    }
+                }
+                
+                // Aggiorna visibilità banner: modello applicato = nascondi banner suggerimento
                 this.updateBannerVisibility({
                     modelRecognized: true,
                     hasLayoutModel: true, // Modello applicato = layout valido
@@ -456,7 +498,7 @@ class PreviewModal {
         }
     }
 
-    show(extractedData, pdfBase64, fileHash, fileName, extractionMode = null, suggestCreateLayout = false, hasLayoutModel = null) {
+    show(extractedData, pdfBase64, fileHash, fileName, extractionMode = null, suggestCreateLayout = false, hasLayoutModel = null, aiFallbackUsed = false, aiFallbackFields = []) {
         this.currentData = extractedData;
         this.currentFileHash = fileHash;
         this.currentFileName = fileName;
@@ -464,6 +506,32 @@ class PreviewModal {
 
         // Verifica se extractedData è disponibile (potrebbe essere undefined per QUEUED/PROCESSING)
         const hasExtractedData = extractedData && typeof extractedData === 'object';
+        
+        // Gestione banner warning AI fallback
+        const aiFallbackBanner = document.getElementById('ai-fallback-warning-banner');
+        const aiFallbackFieldsList = document.getElementById('ai-fallback-fields-list');
+        
+        if (aiFallbackBanner) {
+            if (aiFallbackUsed && aiFallbackFields && aiFallbackFields.length > 0) {
+                // Mostra banner warning
+                aiFallbackBanner.classList.remove('hidden');
+                if (aiFallbackFieldsList) {
+                    // Formatta lista campi completati via AI
+                    const fieldsLabels = {
+                        'data': 'Data',
+                        'mittente': 'Mittente',
+                        'destinatario': 'Destinatario',
+                        'numero_documento': 'Numero Documento',
+                        'totale_kg': 'Totale Kg'
+                    };
+                    const formattedFields = aiFallbackFields.map(field => fieldsLabels[field] || field).join(', ');
+                    aiFallbackFieldsList.textContent = formattedFields;
+                }
+            } else {
+                // Nascondi banner
+                aiFallbackBanner.classList.add('hidden');
+            }
+        }
 
         // Reset tutti gli stati di riconoscimento modello
         const statusEl = document.getElementById('model-detection-status');
