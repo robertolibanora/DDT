@@ -389,39 +389,58 @@ def start_watcher_background(observer: Observer):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # FIX CRITICO: Startup deve essere NON-BLOCCANTE (< 10ms)
+    # Tutte le operazioni lunghe vengono spostate in thread daemon
+    
     # Assicurati che la cartella inbox esista (usando sistema paths centralizzato)
     from app.paths import get_inbox_dir
     inbox_path = get_inbox_dir()
     logger.info(f"📁 Cartella inbox verificata: {inbox_path}")
     
-    # Migra documenti READY (deprecato) a READY_FOR_REVIEW per backward compatibility
-    try:
-        from app.processed_documents import migrate_ready_to_ready_for_review
-        migrated_count = migrate_ready_to_ready_for_review()
-        if migrated_count > 0:
-            logger.info(f"🔄 Migrazione stati completata: {migrated_count} documento(i) migrato(i)")
-    except Exception as e:
-        logger.warning(f"⚠️ Errore migrazione stati: {e}")
+    # Sposta operazioni lunghe in thread daemon (NON bloccanti)
+    def init_background_tasks():
+        """Inizializza task in background (migrazione, layout models, controllo STUCK)"""
+        try:
+            # Migra documenti READY (deprecato) a READY_FOR_REVIEW per backward compatibility
+            from app.processed_documents import migrate_ready_to_ready_for_review
+            migrated_count = migrate_ready_to_ready_for_review()
+            if migrated_count > 0:
+                logger.info(f"🔄 Migrazione stati completata: {migrated_count} documento(i) migrato(i)")
+        except Exception as e:
+            logger.warning(f"⚠️ Errore migrazione stati: {e}")
+        
+        try:
+            # Carica layout models all'avvio per loggare disponibilità
+            from app.layout_rules.manager import load_layout_rules
+            rules = load_layout_rules()
+            if rules:
+                logger.info(f"📐 Layout models disponibili all'avvio: {len(rules)} modello(i)")
+                # Log per mittente
+                from app.layout_rules.manager import normalize_sender
+                sender_counts = {}
+                for rule_name, rule in rules.items():
+                    supplier = rule.match.supplier
+                    sender_norm = normalize_sender(supplier)
+                    sender_counts[sender_norm] = sender_counts.get(sender_norm, 0) + 1
+                for sender_norm, count in sender_counts.items():
+                    logger.info(f"   📦 Loaded {count} layout model(s) for sender: {sender_norm}")
+            else:
+                logger.info("📐 Nessun layout model disponibile all'avvio")
+        except Exception as e:
+            logger.warning(f"⚠️ Errore caricamento layout models all'avvio: {e}")
+        
+        try:
+            # Esegui un controllo iniziale all'avvio (in background)
+            from app.processed_documents import check_and_mark_stuck_documents
+            initial_stuck = check_and_mark_stuck_documents()
+            if initial_stuck > 0:
+                logger.info(f"🔍 Controllo iniziale STUCK: {initial_stuck} documento(i) già bloccato(i)")
+        except Exception as e:
+            logger.warning(f"⚠️ Errore controllo iniziale STUCK: {e}")
     
-    # Carica layout models all'avvio per loggare disponibilità
-    try:
-        from app.layout_rules.manager import load_layout_rules
-        rules = load_layout_rules()
-        if rules:
-            logger.info(f"📐 Layout models disponibili all'avvio: {len(rules)} modello(i)")
-            # Log per mittente
-            from app.layout_rules.manager import normalize_sender
-            sender_counts = {}
-            for rule_name, rule in rules.items():
-                supplier = rule.match.supplier
-                sender_norm = normalize_sender(supplier)
-                sender_counts[sender_norm] = sender_counts.get(sender_norm, 0) + 1
-            for sender_norm, count in sender_counts.items():
-                logger.info(f"   📦 Loaded {count} layout model(s) for sender: {sender_norm}")
-        else:
-            logger.info("📐 Nessun layout model disponibile all'avvio")
-    except Exception as e:
-        logger.warning(f"⚠️ Errore caricamento layout models all'avvio: {e}")
+    # Avvia task iniziali in thread daemon (NON bloccante)
+    threading.Thread(target=init_background_tasks, daemon=True).start()
+    logger.info("🚀 Task iniziali avviati in background (migrazione, layout models, controllo STUCK)")
     
     # Startup - avvia il watchdog in background
     global _global_observer
@@ -474,15 +493,8 @@ async def lifespan(app: FastAPI):
     _cleanup_thread.start()
     logger.info("🔍 Cleanup periodico STUCK avviato (controllo ogni 5 minuti)")
     
-    # Esegui un controllo iniziale all'avvio
-    try:
-        from app.processed_documents import check_and_mark_stuck_documents
-        initial_stuck = check_and_mark_stuck_documents()
-        if initial_stuck > 0:
-            logger.info(f"🔍 Controllo iniziale STUCK: {initial_stuck} documento(i) già bloccato(i)")
-    except Exception as e:
-        logger.warning(f"⚠️ Errore controllo iniziale STUCK: {e}")
-    
+    # Startup completato - yield immediato (NON bloccante)
+    logger.info("✅ [LIFESPAN] Startup completato, yield a uvicorn")
     yield
     
     # Shutdown (chiamato quando uvicorn termina normalmente)
