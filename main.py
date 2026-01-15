@@ -1089,6 +1089,29 @@ async def process_queue_item(queue_id: str, request: Request, auth: bool = Depen
         logger.error(f"Errore processamento coda: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Errore durante il processamento: {str(e)}")
 
+@app.get("/api/pending-documents-count")
+async def get_pending_documents_count(request: Request, auth: bool = Depends(check_auth)):
+    """
+    Endpoint per ottenere il numero di documenti in attesa di intervento.
+    
+    Restituisce il conteggio di documenti in stati:
+    - QUEUED: in coda per processing
+    - PROCESSING: in elaborazione
+    - READY_FOR_REVIEW: pronti per revisione
+    - STUCK: bloccati e richiedono azione manuale
+    """
+    try:
+        from app.processed_documents import count_pending_documents
+        count = count_pending_documents()
+        return JSONResponse({
+            "success": True,
+            "count": count,
+            "has_pending": count > 0
+        })
+    except Exception as e:
+        logger.error(f"Errore conteggio documenti in attesa: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Errore durante il conteggio: {str(e)}")
+
 @app.post("/data/clear")
 async def delete_all_ddt(request: Request, auth: bool = Depends(check_auth)):
     """Endpoint per cancellare tutti i DDT dal file Excel"""

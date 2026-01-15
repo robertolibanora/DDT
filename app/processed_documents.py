@@ -970,6 +970,39 @@ def get_stuck_documents() -> list[Dict[str, Any]]:
         return stuck_docs
 
 
+def count_pending_documents() -> int:
+    """
+    Conta tutti i documenti in stati "in attesa" che richiedono intervento.
+    
+    Stati considerati "in attesa":
+    - QUEUED: documento caricato manualmente, in attesa di processing
+    - PROCESSING: documento in elaborazione (può richiedere attenzione se bloccato)
+    - READY_FOR_REVIEW: documento pronto per revisione utente
+    - STUCK: documento bloccato oltre timeout, richiede azione manuale
+    
+    Returns:
+        Numero totale di documenti in attesa
+    """
+    with _documents_lock:
+        data = _load_documents()
+        documents = data.get("documents", {})
+        
+        pending_count = 0
+        pending_states = {
+            DocumentStatus.QUEUED.value,
+            DocumentStatus.PROCESSING.value,
+            DocumentStatus.READY_FOR_REVIEW.value,
+            DocumentStatus.STUCK.value
+        }
+        
+        for doc_hash, doc in documents.items():
+            status = doc.get("status", "")
+            if status in pending_states:
+                pending_count += 1
+        
+        return pending_count
+
+
 def reset_stuck_to_new(doc_hash: str) -> bool:
     """
     DEPRECATO: Usa transition_document_state() con STUCK → PROCESSING invece.

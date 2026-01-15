@@ -851,6 +851,10 @@ class PreviewModal {
                 // Se siamo nella dashboard, ricarica i dati senza refresh completo
                 if (window.location.pathname === '/dashboard' && typeof refreshData === 'function') {
                     refreshData();
+                    // Aggiorna anche il banner documenti in attesa
+                    if (typeof updatePendingDocumentsBanner === 'function') {
+                        updatePendingDocumentsBanner();
+                    }
                 } else if (window.location.pathname === '/upload') {
                     // Se siamo nella pagina upload, mostra messaggio di successo
                     const messageDiv = document.getElementById('message');
