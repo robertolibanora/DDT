@@ -2,7 +2,6 @@ import os
 import socket
 import threading
 import logging
-import signal
 import sys
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -116,42 +115,7 @@ def stop_cleanup_thread_safely():
         logger.info("✅ [STOP_CLEANUP] Cleanup completato")
 
 
-def shutdown_handler(signum, frame):
-    """
-    Gestore per segnali di shutdown (SIGTERM, SIGINT).
-    Ferma tutti i thread/task ma NON termina il processo (uvicorn gestisce la terminazione).
-    """
-    signal_name = signal.Signals(signum).name if hasattr(signal.Signals, '__call__') else ("SIGTERM" if signum == signal.SIGTERM else "SIGINT")
-    # Log immediato per verificare che il segnale arrivi
-    print(f"\n⛔ SIGTERM/SIGINT RICEVUTO ({signal_name}) - Inizio shutdown thread/observer...", flush=True)
-    logger.critical(f"⛔ SIGTERM/SIGINT RICEVUTO ({signal_name}) - Inizio shutdown thread/observer...")
-    
-    try:
-        # Ferma cleanup thread PRIMA del watchdog (ordine inverso rispetto startup)
-        logger.info("🧹 [SHUTDOWN] Fermata cleanup thread...")
-        stop_cleanup_thread_safely()
-        logger.info("✅ [SHUTDOWN] Cleanup thread fermato")
-    except Exception as e:
-        logger.error(f"❌ Errore durante shutdown cleanup thread: {e}", exc_info=True)
-    
-    try:
-        # Ferma watchdog observer
-        logger.info("🛑 [SHUTDOWN] Fermata watchdog observer...")
-        stop_watchdog_safely()
-        logger.info("✅ [SHUTDOWN] Watchdog observer fermato")
-    except Exception as e:
-        logger.error(f"❌ Errore durante shutdown watchdog: {e}", exc_info=True)
-    
-    # Log finale - FINE HANDLER (uvicorn gestisce la terminazione del processo)
-    logger.critical("✅ [SHUTDOWN] Thread/observer fermati, uvicorn gestirà la terminazione del processo")
-    print("✅ [SHUTDOWN] Thread/observer fermati", flush=True)
-
-
-# Registra handler per segnali di shutdown (SIGTERM da systemd, SIGINT da Ctrl+C)
-# IMPORTANTE: Registrato a livello di modulo per essere attivo sempre, anche con systemd
-signal.signal(signal.SIGTERM, shutdown_handler)
-signal.signal(signal.SIGINT, shutdown_handler)
-logger.info("📡 Handler segnali di shutdown registrati (SIGTERM, SIGINT)")
+# Gestione segnali rimossa - uvicorn gestisce SIGTERM/SIGINT automaticamente
                             
 def get_local_ip():
     """Ottiene l'IP locale della macchina"""
@@ -496,31 +460,35 @@ async def lifespan(app: FastAPI):
     # Startup completato - yield immediato (NON bloccante)
     logger.info("✅ [LIFESPAN] Startup completato, yield a uvicorn")
     yield
-    
-    # Shutdown (chiamato quando uvicorn termina normalmente)
-    logger.critical("⛔ [LIFESPAN] Shutdown richiesto dal lifecycle FastAPI, arresto di tutti i thread/task...")
-    print("⛔ [LIFESPAN] Shutdown lifecycle FastAPI...", flush=True)
+
+app = FastAPI(lifespan=lifespan)
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """
+    Handler FastAPI ufficiale per shutdown.
+    Ferma watchdog e cleanup thread senza bloccare.
+    Uvicorn gestisce automaticamente SIGTERM/SIGINT.
+    """
+    logger.critical("⛔ [SHUTDOWN] Shutdown richiesto, arresto thread/observer...")
     
     # Ferma cleanup thread PRIMA del watchdog (ordine inverso rispetto startup)
     try:
-        logger.info("🧹 [LIFESPAN] Fermata cleanup thread...")
+        logger.info("🧹 [SHUTDOWN] Fermata cleanup thread...")
         stop_cleanup_thread_safely()
-        logger.info("✅ [LIFESPAN] Cleanup thread fermato")
+        logger.info("✅ [SHUTDOWN] Cleanup thread fermato")
     except Exception as e:
-        logger.error(f"❌ [LIFESPAN] Errore durante shutdown cleanup thread: {e}", exc_info=True)
+        logger.error(f"❌ [SHUTDOWN] Errore durante shutdown cleanup thread: {e}", exc_info=True)
     
     # Ferma watchdog observer
     try:
-        logger.info("🛑 [LIFESPAN] Fermata watchdog observer...")
+        logger.info("🛑 [SHUTDOWN] Fermata watchdog observer...")
         stop_watchdog_safely()
-        logger.info("✅ [LIFESPAN] Watchdog observer fermato")
+        logger.info("✅ [SHUTDOWN] Watchdog observer fermato")
     except Exception as e:
-        logger.error(f"❌ [LIFESPAN] Errore durante shutdown watchdog: {e}", exc_info=True)
+        logger.error(f"❌ [SHUTDOWN] Errore durante shutdown watchdog: {e}", exc_info=True)
     
-    logger.critical("✅ [LIFESPAN] Shutdown completato (tutti i thread/task fermati)")
-    print("✅ [LIFESPAN] Shutdown completato", flush=True)
-
-app = FastAPI(lifespan=lifespan)
+    logger.critical("✅ [SHUTDOWN] Shutdown completato (tutti i thread/task fermati)")
 
 @app.get("/health", include_in_schema=False)
 def health():
