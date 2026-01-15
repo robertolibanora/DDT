@@ -20,6 +20,7 @@ _documents_lock = threading.Lock()
 # Stati possibili per un documento
 class DocumentStatus(str, Enum):
     NEW = "NEW"
+    QUEUED = "QUEUED"  # Documento caricato manualmente, in attesa di processing da parte del worker
     PROCESSING = "PROCESSING"  # Stato tecnico: elaborazione in corso (invisibile all'utente)
     STUCK = "STUCK"  # Stato intermedio: PROCESSING bloccato oltre il timeout (richiede attenzione manuale)
     READY = "READY"  # DEPRECATO: mantenuto per backward compatibility, migrato automaticamente a READY_FOR_REVIEW
@@ -126,9 +127,10 @@ def calculate_file_hash(file_path: str) -> str:
 # - STUCK può essere riprocessato solo manualmente (STUCK → PROCESSING)
 # ============================================================================
 _VALID_TRANSITIONS = {
-    None: [DocumentStatus.NEW, DocumentStatus.PROCESSING, DocumentStatus.READY_FOR_REVIEW, 
+    None: [DocumentStatus.NEW, DocumentStatus.QUEUED, DocumentStatus.PROCESSING, DocumentStatus.READY_FOR_REVIEW, 
            DocumentStatus.FINALIZED, DocumentStatus.ERROR_FINAL],  # Creazione nuovo documento
     DocumentStatus.NEW: [DocumentStatus.PROCESSING, DocumentStatus.ERROR_FINAL],
+    DocumentStatus.QUEUED: [DocumentStatus.PROCESSING, DocumentStatus.ERROR_FINAL],  # Worker preleva QUEUED e passa a PROCESSING
     DocumentStatus.PROCESSING: [
         DocumentStatus.READY_FOR_REVIEW,  # Successo: dati estratti, pronto per revisione
         DocumentStatus.STUCK,                # Timeout: bloccato oltre soglia
@@ -702,6 +704,10 @@ def should_process_document(doc_hash: str) -> tuple[bool, str]:
         if status == DocumentStatus.READY.value:
             return False, "already_ready"
         
+        # QUEUED può essere processato dal worker
+        if status == DocumentStatus.QUEUED.value:
+            return True, "queued_ready_for_processing"
+        
         # NEW o altri stati possono essere riprocessati
         return True, "reprocess_allowed"
 
@@ -900,6 +906,36 @@ def check_and_mark_stuck_documents(timeout_minutes: Optional[int] = None) -> int
                 stuck_count += 1
         
         return stuck_count
+
+
+def get_queued_documents() -> list[Dict[str, Any]]:
+    """
+    Ottiene tutti i documenti in stato QUEUED (caricati manualmente, in attesa di processing)
+    
+    Returns:
+        Lista di documenti QUEUED con informazioni complete
+    """
+    with _documents_lock:
+        data = _load_documents()
+        documents = data.get("documents", {})
+        
+        queued_docs = []
+        for doc_hash, doc in documents.items():
+            if doc.get("status") == DocumentStatus.QUEUED.value:
+                queued_docs.append({
+                    "hash": doc_hash,
+                    "file_name": doc.get("file_name", "N/A"),
+                    "file_path": doc.get("file_path", ""),
+                    "status": DocumentStatus.QUEUED.value,
+                    "first_seen": doc.get("first_seen", ""),
+                    "last_updated": doc.get("last_updated", ""),
+                    "queue_id": doc.get("queue_id"),
+                    "error_message": doc.get("error_message")
+                })
+        
+        # Ordina per first_seen (più vecchi prima - FIFO)
+        queued_docs.sort(key=lambda x: x.get("first_seen", ""), reverse=False)
+        return queued_docs
 
 
 def get_stuck_documents() -> list[Dict[str, Any]]:

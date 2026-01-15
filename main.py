@@ -668,13 +668,20 @@ async def home(request: Request):
 
 @app.post("/upload")
 async def upload_ddt(request: Request, file: UploadFile = File(...), auth: bool = Depends(check_auth)):
-    """Endpoint per upload manuale di DDT PDF - salva copia in inbox e restituisce anteprima"""
+    """
+    Endpoint per upload manuale di DDT PDF - salva file in inbox e registra come QUEUED.
+    
+    IMPORTANTE: Il WEB server NON processa mai PDF. Questo endpoint:
+    - Salva il file in inbox
+    - Registra il documento come QUEUED
+    - Restituisce risposta immediata
+    
+    Il processing completo viene eseguito dal worker.
+    """
     if not file.filename.lower().endswith('.pdf'):
         raise HTTPException(status_code=400, detail="Il file deve essere un PDF")
     
     import tempfile
-    import base64
-    import shutil
     from datetime import datetime
     
     tmp_path = None
@@ -689,16 +696,12 @@ async def upload_ddt(request: Request, file: UploadFile = File(...), auth: bool 
                 raise HTTPException(status_code=400, detail="Il file è vuoto")
             tmp_file.write(content)
         
-        logger.info(f"📤 Upload manuale file: {file.filename} ({len(content)} bytes)")
+        logger.info(f"📤 [WEB] Upload manuale file: {file.filename} ({len(content)} bytes)")
         
-        # REGOLA FERREA: Upload manuale usa lo stesso flusso del watchdog
         # 1. Calcola hash PRIMA di qualsiasi operazione
         from app.processed_documents import (
             calculate_file_hash,
             should_process_document,
-            register_document,
-            mark_document_error,
-            mark_document_ready,
             DocumentStatus,
             is_document_finalized,
             transition_document_state
@@ -709,33 +712,36 @@ async def upload_ddt(request: Request, file: UploadFile = File(...), auth: bool 
         
         # Verifica se documento già finalizzato
         if is_document_finalized(file_hash):
-            logger.info(f"⏭️ Documento già FINALIZED (hash={file_hash[:16]}...), ignoro upload - {file.filename}")
+            logger.info(f"⏭️ [WEB] Documento già FINALIZED (hash={file_hash[:16]}...), ignoro upload - {file.filename}")
             raise HTTPException(status_code=400, detail="Documento già finalizzato")
         
         # Verifica se documento dovrebbe essere processato
         should_process, reason = should_process_document(file_hash)
         if not should_process:
             if reason == "already_finalized":
-                logger.info(f"⏭️ Documento già FINALIZED (hash={file_hash[:16]}...), ignoro upload - {file.filename}")
+                logger.info(f"⏭️ [WEB] Documento già FINALIZED (hash={file_hash[:16]}...), ignoro upload - {file.filename}")
                 raise HTTPException(status_code=400, detail="Documento già finalizzato")
             elif reason == "error_final":
-                logger.info(f"⏭️ Documento in ERROR_FINAL (hash={file_hash[:16]}...), ignoro upload - {file.filename}")
+                logger.info(f"⏭️ [WEB] Documento in ERROR_FINAL (hash={file_hash[:16]}...), ignoro upload - {file.filename}")
                 raise HTTPException(status_code=400, detail="Documento in errore definitivo")
             elif reason == "already_processing":
-                logger.info(f"⏭️ Documento già in PROCESSING (hash={file_hash[:16]}...), ignoro upload - {file.filename}")
+                logger.info(f"⏭️ [WEB] Documento già in PROCESSING (hash={file_hash[:16]}...), ignoro upload - {file.filename}")
                 raise HTTPException(status_code=400, detail="Documento già in elaborazione")
             elif reason == "already_ready" or reason == "already_ready_for_review":
-                logger.info(f"⏭️ Documento già READY_FOR_REVIEW (hash={file_hash[:16]}...), ignoro upload - {file.filename}")
+                logger.info(f"⏭️ [WEB] Documento già READY_FOR_REVIEW (hash={file_hash[:16]}...), ignoro upload - {file.filename}")
                 raise HTTPException(status_code=400, detail="Documento già pronto per revisione")
+            elif reason == "queued_ready_for_processing":
+                logger.info(f"⏭️ [WEB] Documento già QUEUED (hash={file_hash[:16]}...), ignoro upload - {file.filename}")
+                raise HTTPException(status_code=400, detail="Documento già in coda per elaborazione")
             else:
-                logger.info(f"⏭️ Documento non processabile: {reason} (hash={file_hash[:16]}...) - {file.filename}")
+                logger.info(f"⏭️ [WEB] Documento non processabile: {reason} (hash={file_hash[:16]}...) - {file.filename}")
                 raise HTTPException(status_code=400, detail=f"Documento non processabile: {reason}")
         
-        # Salva una copia nella cartella inbox PRIMA dell'estrazione
+        # 2. Salva il file nella cartella inbox
         from app.paths import get_inbox_dir, safe_copy
         inbox_path = get_inbox_dir()
         
-        # Genera un nome file basato sul numero documento e mittente per facilitare la ricerca
+        # Genera un nome file basato sul timestamp per facilitare la ricerca
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_filename = f"UPLOAD_{timestamp}_{file.filename}"
         safe_filename = "".join(c for c in safe_filename if c.isalnum() or c in "._- ")
@@ -754,117 +760,41 @@ async def upload_ddt(request: Request, file: UploadFile = File(...), auth: bool 
         # Copia il file nella cartella inbox usando safe_copy
         tmp_path_obj = Path(tmp_path).resolve()
         inbox_saved_path = safe_copy(tmp_path_obj, inbox_saved_path)
-        logger.info(f"📁 File salvato in inbox: {inbox_saved_path.name}")
+        logger.info(f"📁 [WEB] File salvato in inbox: {inbox_saved_path.name}")
         
-        # 2. Registra come PROCESSING (stesso flusso watchdog)
+        # 3. Registra come QUEUED (il worker lo processerà)
         try:
             transition_document_state(
                 doc_hash=file_hash,
                 from_state=None,
-                to_state=DocumentStatus.PROCESSING,
-                reason="Upload manuale - avvio processing",
+                to_state=DocumentStatus.QUEUED,
+                reason="Upload manuale - file in coda per processing da worker",
                 metadata={
                     "file_path": str(inbox_saved_path),
                     "file_name": file.filename
                 }
             )
-            logger.info(f"📄 Upload manuale registrato: hash={file_hash[:16]}... file={file.filename}")
+            logger.info(f"✅ [WEB] Upload queued: hash={file_hash[:16]}... file={file.filename}")
         except Exception as e:
-            logger.error(f"❌ Errore registrazione upload: {e}", exc_info=True)
+            logger.error(f"❌ [WEB] Errore registrazione upload: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"Errore durante la registrazione: {str(e)}")
         
-            # 3. Estrai dati (stesso flusso watchdog)
-        try:
-            data = extract_from_pdf(str(inbox_saved_path))
-            extraction_mode = data.pop("_extraction_mode", None)  # Estrai extraction_mode dal risultato
-            
-            # Verifica se questo numero documento è già in Excel (controllo finale)
-            try:
-                from app.excel import read_excel_as_dict
-                existing_data = read_excel_as_dict()
-                for row in existing_data.get("rows", []):
-                    if (row.get("numero_documento") == data.get("numero_documento") and 
-                        row.get("mittente", "").strip() == data.get("mittente", "").strip()):
-                        logger.info(f"⏭️ DDT già presente in Excel (numero: {data.get('numero_documento')}), marco come FINALIZED - {file.filename}")
-                        from app.processed_documents import mark_document_finalized
-                        mark_document_finalized(file_hash)
-                        raise HTTPException(status_code=400, detail="DDT già presente in Excel")
-            except HTTPException:
-                raise
-            except Exception as e:
-                logger.debug(f"Errore controllo Excel: {e}")
-                # Continua comunque
-            
-            # Converti PDF in base64
-            pdf_base64 = base64.b64encode(content).decode()
-            
-            # Genera PNG di anteprima
-            preview_generated = False
-            try:
-                preview_path = generate_preview_png(str(inbox_saved_path), file_hash)
-                if preview_path:
-                    logger.info(f"✅ PNG anteprima generata: {preview_path}")
-                    preview_generated = True
-                else:
-                    logger.warning(f"⚠️ Impossibile generare PNG anteprima per {file_hash[:16]}...")
-            except Exception as e:
-                logger.warning(f"⚠️ Errore generazione PNG anteprima: {e}")
-            
-            # Aggiungi alla coda watchdog (stesso flusso, con extraction_mode)
-            from app.watchdog_queue import add_to_queue
-            queue_id = add_to_queue(str(inbox_saved_path), data, pdf_base64, file_hash, extraction_mode)
-            logger.info(f"📋 Upload aggiunto alla coda: queue_id={queue_id} hash={file_hash[:16]}... numero={data.get('numero_documento', 'N/A')}")
-            
-            # Marca come READY_FOR_REVIEW quando tutto è pronto (stesso flusso watchdog)
-            mark_document_ready(file_hash, queue_id, extraction_mode)
-            logger.info(f"✅ Upload READY_FOR_REVIEW: hash={file_hash[:16]}... numero={data.get('numero_documento', 'N/A')} extraction_mode={extraction_mode or 'N/A'}")
-            
-            # Calcola flag layout model
-            suggest_create_layout = (extraction_mode == "AI_FALLBACK")
-            has_layout_model = (extraction_mode in ("LAYOUT_MODEL", "HYBRID_LAYOUT_AI"))
-            
-            return JSONResponse({
-                "success": True,
-                "extracted_data": data,
-                "file_hash": file_hash,
-                "file_name": file.filename,
-                "file_path": str(inbox_saved_path),
-                "pdf_base64": pdf_base64,
-                "pdf_mime": "application/pdf",
-                "queue_id": queue_id,
-                "extraction_mode": extraction_mode,  # Modalità di estrazione
-                "suggest_create_layout": suggest_create_layout,  # Flag di suggerimento (backward compatibility)
-                "has_layout_model": has_layout_model  # Flag esplicito: true se ha layout model
-            })
-        except HTTPException:
-            # Rilancia HTTPException così com'è
-            raise
-        except ValueError as e:
-            logger.error(f"❌ Errore validazione durante upload: {e}")
-            # Marca come ERROR_FINAL se abbiamo l'hash
-            if 'file_hash' in locals():
-                try:
-                    mark_document_error(file_hash, f"Errore validazione: {str(e)}")
-                except Exception:
-                    pass
-            raise HTTPException(status_code=422, detail=f"Dati estratti non validi: {str(e)}")
-        except FileNotFoundError:
-            logger.warning(f"⚠️ File non trovato (potrebbe essere stato spostato): {inbox_saved_path if 'inbox_saved_path' in locals() else 'N/A'}")
-            if 'file_hash' in locals():
-                try:
-                    mark_document_error(file_hash, "File non trovato dopo upload")
-                except Exception:
-                    pass
-            raise HTTPException(status_code=404, detail="File non trovato")
-        except Exception as e:
-            logger.error(f"❌ Errore durante elaborazione upload: {e}", exc_info=True)
-            # Marca come ERROR_FINAL se abbiamo l'hash
-            if 'file_hash' in locals():
-                try:
-                    mark_document_error(file_hash, f"Errore parsing: {str(e)}")
-                except Exception:
-                    pass
-            raise HTTPException(status_code=500, detail=f"Errore durante l'elaborazione: {str(e)}")
+        # 4. Restituisci risposta immediata (NON processare PDF qui)
+        return JSONResponse({
+            "success": True,
+            "file_hash": file_hash,
+            "file_name": file.filename,
+            "file_path": str(inbox_saved_path),
+            "status": "QUEUED",
+            "message": "File caricato con successo. Il processing verrà eseguito dal worker."
+        })
+        
+    except HTTPException:
+        # Rilancia HTTPException così com'è
+        raise
+    except Exception as e:
+        logger.error(f"❌ [WEB] Errore durante upload: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Errore durante l'upload: {str(e)}")
     finally:
         # Elimina il file temporaneo (ora abbiamo la copia in inbox)
         if tmp_path and os.path.exists(tmp_path):

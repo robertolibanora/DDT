@@ -17,6 +17,7 @@ import logging
 import signal
 import sys
 from pathlib import Path
+from typing import Dict, Any
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
@@ -34,8 +35,10 @@ logger = logging.getLogger(__name__)
 # Variabili globali per gestione shutdown
 _global_observer: Observer | None = None
 _cleanup_thread: threading.Thread | None = None
+_queued_processing_thread: threading.Thread | None = None
 _shutdown_in_progress = False
 _cleanup_shutdown_flag = threading.Event()
+_queued_processing_shutdown_flag = threading.Event()
 _shutdown_event = threading.Event()  # Event principale per shutdown
 
 
@@ -322,6 +325,40 @@ def stop_cleanup_thread_safely():
         logger.info("✅ [WORKER] [STOP_CLEANUP] Cleanup completato")
 
 
+def stop_queued_processing_thread_safely():
+    """
+    Ferma il thread di processing QUEUED in modo sicuro.
+    Imposta il flag di shutdown e attende la terminazione del thread.
+    """
+    global _queued_processing_thread, _queued_processing_shutdown_flag
+    
+    logger.info("📋 [WORKER] [STOP_QUEUED] Inizio fermata queued processing thread...")
+    
+    if _queued_processing_thread is None:
+        logger.debug("⚠️ [WORKER] [STOP_QUEUED] Queued processing thread non inizializzato, skip")
+        return
+    
+    try:
+        if _queued_processing_thread.is_alive():
+            logger.info("📋 [WORKER] [STOP_QUEUED] Thread attivo, impostazione flag shutdown...")
+            # Imposta flag di shutdown per interrompere il loop
+            _queued_processing_shutdown_flag.set()
+            logger.info("📋 [WORKER] [STOP_QUEUED] Attesa terminazione thread (timeout 2s)...")
+            _queued_processing_thread.join(timeout=2.0)
+            
+            if _queued_processing_thread.is_alive():
+                logger.warning("⚠️ [WORKER] [STOP_QUEUED] Queued processing thread non terminato entro timeout di 2 secondi")
+            else:
+                logger.info("✅ [WORKER] [STOP_QUEUED] Queued processing thread fermato correttamente")
+        else:
+            logger.debug("ℹ️ [WORKER] [STOP_QUEUED] Queued processing thread già fermato")
+    except Exception as e:
+        logger.error(f"❌ [WORKER] [STOP_QUEUED] Errore durante lo shutdown del queued processing thread: {e}", exc_info=True)
+    finally:
+        _queued_processing_thread = None
+        logger.info("✅ [WORKER] [STOP_QUEUED] Cleanup completato")
+
+
 def stuck_cleanup_loop():
     """
     Loop periodico per controllare e marcare documenti PROCESSING bloccati come STUCK.
@@ -355,6 +392,185 @@ def stuck_cleanup_loop():
             logger.error(f"❌ [WORKER] [CLEANUP_LOOP] Errore nel cleanup STUCK: {e}", exc_info=True)
     
     logger.info("✅ [WORKER] [CLEANUP_LOOP] Cleanup loop STUCK terminato")
+
+
+def process_queued_document(doc_info: Dict[str, Any]) -> None:
+    """
+    Processa un documento QUEUED (caricato manualmente via /upload).
+    
+    IMPORTANTE: Questa funzione viene SEMPRE eseguita in thread daemon separato
+    per NON bloccare mai il loop principale. Operazioni pesanti sono accettabili.
+    
+    Args:
+        doc_info: Dizionario con informazioni del documento QUEUED (hash, file_path, file_name)
+    """
+    doc_hash = doc_info.get("hash")
+    file_path = doc_info.get("file_path", "")
+    file_name = doc_info.get("file_name", "N/A")
+    
+    if not doc_hash or not file_path:
+        logger.warning(f"⚠️ [WORKER] [PROCESS_QUEUED] Informazioni documento incomplete: hash={doc_hash}, path={file_path}")
+        return
+    
+    try:
+        logger.info(f"📄 [WORKER] [PROCESS_QUEUED] Processing started: hash={doc_hash[:16]}... file={file_name}")
+        
+        from app.processed_documents import (
+            mark_document_error,
+            DocumentStatus,
+            is_document_finalized,
+            transition_document_state
+        )
+        
+        # Verifica che il file esista
+        file_path_obj = Path(file_path)
+        if not file_path_obj.exists():
+            logger.warning(f"⚠️ [WORKER] [PROCESS_QUEUED] File non trovato: {file_path}")
+            transition_document_state(
+                doc_hash=doc_hash,
+                from_state=DocumentStatus.QUEUED,
+                to_state=DocumentStatus.ERROR_FINAL,
+                reason="File non trovato dopo upload",
+                metadata={"error_message": "File non trovato dopo upload"}
+            )
+            return
+        
+        # Verifica se il documento è già FINALIZED (doppio controllo)
+        if is_document_finalized(doc_hash):
+            logger.info(f"⏭️ [WORKER] [PROCESS_QUEUED] Documento già FINALIZED (hash={doc_hash[:16]}...), ignoro - {file_name}")
+            return
+        
+        # Transizione QUEUED → PROCESSING
+        transition_document_state(
+            doc_hash=doc_hash,
+            from_state=DocumentStatus.QUEUED,
+            to_state=DocumentStatus.PROCESSING,
+            reason="Worker preleva documento QUEUED - avvio processing",
+            metadata={
+                "file_path": file_path,
+                "file_name": file_name
+            }
+        )
+        
+        logger.info(f"📄 [WORKER] [PROCESS_QUEUED] Transizione QUEUED → PROCESSING: hash={doc_hash[:16]}... file={file_name}")
+        
+        import base64
+        from app.watchdog_queue import add_to_queue
+        
+        # Leggi il file PDF
+        from app.paths import safe_open
+        file_path_obj = file_path_obj.resolve()
+        with safe_open(file_path_obj, 'rb') as f:
+            pdf_bytes = f.read()
+        
+        if len(pdf_bytes) == 0:
+            logger.warning(f"⚠️ [WORKER] [PROCESS_QUEUED] File PDF vuoto: {file_path}")
+            mark_document_error(doc_hash, "File PDF vuoto")
+            return
+        
+        # Estrai i dati (OPERAZIONE PESANTE)
+        logger.info(f"🔍 [WORKER] [PROCESS_QUEUED] Avvio estrazione dati da PDF: {file_name}")
+        from app.extract import extract_from_pdf, generate_preview_png
+        data = extract_from_pdf(file_path)
+        extraction_mode = data.pop("_extraction_mode", None)
+        logger.info(f"✅ [WORKER] [PROCESS_QUEUED] Estrazione dati completata: {file_name} (mode={extraction_mode})")
+        
+        # Verifica se questo numero documento è già in Excel (controllo finale)
+        try:
+            from app.excel import read_excel_as_dict
+            existing_data = read_excel_as_dict()
+            for row in existing_data.get("rows", []):
+                if (row.get("numero_documento") == data.get("numero_documento") and 
+                    row.get("mittente", "").strip() == data.get("mittente", "").strip()):
+                    logger.info(f"⏭️ [WORKER] [PROCESS_QUEUED] DDT già presente in Excel (numero: {data.get('numero_documento')}), marco come FINALIZED - {file_name}")
+                    from app.processed_documents import mark_document_finalized
+                    mark_document_finalized(doc_hash)
+                    return
+        except Exception as e:
+            logger.debug(f"[WORKER] [PROCESS_QUEUED] Errore controllo Excel: {e}")
+            # Continua comunque
+        
+        # Converti PDF in base64
+        pdf_base64 = base64.b64encode(pdf_bytes).decode()
+        
+        # Genera PNG di anteprima
+        try:
+            preview_path = generate_preview_png(file_path, doc_hash)
+            if preview_path:
+                logger.info(f"✅ [WORKER] [PROCESS_QUEUED] PNG anteprima generata: {preview_path}")
+            else:
+                logger.warning(f"⚠️ [WORKER] [PROCESS_QUEUED] Impossibile generare PNG anteprima per {doc_hash[:16]}...")
+        except Exception as e:
+            logger.warning(f"⚠️ [WORKER] [PROCESS_QUEUED] Errore generazione PNG anteprima: {e}")
+        
+        # Aggiungi alla coda per l'anteprima (con extraction_mode)
+        logger.info(f"📋 [WORKER] [PROCESS_QUEUED] Aggiunta alla coda watchdog: {file_name}")
+        queue_id = add_to_queue(file_path, data, pdf_base64, doc_hash, extraction_mode)
+        logger.info(f"✅ [WORKER] [PROCESS_QUEUED] DDT aggiunto alla coda: queue_id={queue_id} hash={doc_hash[:16]}... numero={data.get('numero_documento', 'N/A')}")
+        
+        # Marca come READY_FOR_REVIEW quando tutto è pronto
+        from app.processed_documents import mark_document_ready
+        mark_document_ready(doc_hash, queue_id, extraction_mode)
+        logger.info(f"✅ [WORKER] [PROCESS_QUEUED] Documento READY_FOR_REVIEW: hash={doc_hash[:16]}... numero={data.get('numero_documento', 'N/A')} extraction_mode={extraction_mode or 'N/A'}")
+        
+    except ValueError as e:
+        logger.error(f"❌ [WORKER] [PROCESS_QUEUED] Errore validazione DDT: {e}")
+        mark_document_error(doc_hash, f"Errore validazione: {str(e)}")
+    except FileNotFoundError:
+        logger.warning(f"⚠️ [WORKER] [PROCESS_QUEUED] File non trovato: {file_path}")
+        mark_document_error(doc_hash, "File non trovato")
+    except Exception as e:
+        logger.error(f"❌ [WORKER] [PROCESS_QUEUED] Errore nel parsing DDT: {e}", exc_info=True)
+        mark_document_error(doc_hash, f"Errore parsing: {str(e)}")
+    finally:
+        logger.info(f"🏁 [WORKER] [PROCESS_QUEUED] Processing completato: hash={doc_hash[:16]}... file={file_name}")
+
+
+def queued_processing_loop():
+    """
+    Loop periodico per processare documenti QUEUED (caricati manualmente via /upload).
+    
+    IMPORTANTE: Eseguito in thread daemon separato, NON blocca mai il main thread.
+    Usa Event.wait() invece di time.sleep() per permettere interruzione immediata.
+    """
+    import time
+    from app.processed_documents import get_queued_documents
+    # Controlla ogni 10 secondi (più frequente rispetto a cleanup STUCK)
+    check_interval = 10  # 10 secondi
+    
+    logger.info("📋 [WORKER] [QUEUED_LOOP] Loop processing QUEUED avviato (thread daemon)")
+    
+    while not _queued_processing_shutdown_flag.is_set():
+        try:
+            # Usa wait invece di sleep per permettere interruzione immediata (NON-BLOCCANTE)
+            if _queued_processing_shutdown_flag.wait(timeout=check_interval):
+                # Flag di shutdown impostato, esci dal loop
+                logger.info("📋 [WORKER] [QUEUED_LOOP] Shutdown richiesto, terminazione...")
+                break
+            
+            # Esegui processing solo se shutdown non richiesto
+            if not _queued_processing_shutdown_flag.is_set():
+                logger.debug("📋 [WORKER] [QUEUED_LOOP] Controllo documenti QUEUED...")
+                queued_docs = get_queued_documents()
+                
+                if queued_docs:
+                    logger.info(f"📋 [WORKER] [QUEUED_LOOP] Trovati {len(queued_docs)} documento(i) QUEUED, avvio processing...")
+                    # Processa ogni documento QUEUED in un thread separato (non bloccare il loop)
+                    for doc_info in queued_docs:
+                        # Avvia processing in thread daemon separato
+                        thread = threading.Thread(
+                            target=process_queued_document,
+                            args=(doc_info,),
+                            daemon=True
+                        )
+                        thread.start()
+                        logger.debug(f"📋 [WORKER] [QUEUED_LOOP] Thread processing avviato per: {doc_info.get('file_name', 'N/A')}")
+                else:
+                    logger.debug("📋 [WORKER] [QUEUED_LOOP] Nessun documento QUEUED trovato")
+        except Exception as e:
+            logger.error(f"❌ [WORKER] [QUEUED_LOOP] Errore nel processing QUEUED: {e}", exc_info=True)
+    
+    logger.info("✅ [WORKER] [QUEUED_LOOP] Loop processing QUEUED terminato")
 
 
 def init_background_tasks():
@@ -480,6 +696,15 @@ def main():
     _cleanup_thread.start()
     logger.info("✅ [WORKER] Cleanup periodico STUCK avviato (controllo ogni 5 minuti, thread daemon)")
     
+    # Avvia loop periodico per processare documenti QUEUED
+    global _queued_processing_thread, _queued_processing_shutdown_flag
+    _queued_processing_shutdown_flag.clear()  # Reset flag all'avvio
+    
+    logger.info("📋 [WORKER] Avvio queued processing thread...")
+    _queued_processing_thread = threading.Thread(target=queued_processing_loop, daemon=True)
+    _queued_processing_thread.start()
+    logger.info("✅ [WORKER] Loop processing QUEUED avviato (controllo ogni 10 secondi, thread daemon)")
+    
     logger.info("✅ [WORKER] Worker process avviato correttamente")
     
     # Main loop: attende shutdown signal
@@ -492,6 +717,14 @@ def main():
     finally:
         # Shutdown graceful
         logger.critical("⛔ [WORKER] [SHUTDOWN] Shutdown richiesto, arresto thread/observer...")
+        
+        # Ferma queued processing thread PRIMA (più importante)
+        try:
+            logger.info("📋 [WORKER] [SHUTDOWN] Fermata queued processing thread...")
+            stop_queued_processing_thread_safely()
+            logger.info("✅ [WORKER] [SHUTDOWN] Queued processing thread fermato")
+        except Exception as e:
+            logger.error(f"❌ [WORKER] [SHUTDOWN] Errore durante shutdown queued processing thread: {e}", exc_info=True)
         
         # Ferma cleanup thread PRIMA del watchdog (ordine inverso rispetto startup)
         try:
