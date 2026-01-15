@@ -12,34 +12,40 @@
         <div id="message" class="message hidden"></div>
         
         <form id="upload-form" enctype="multipart/form-data">
-            <div class="form-group">
-                <label for="file-input">Seleziona un file DDT (PDF)</label>
+            <!-- Area drag & drop molto grande e centrale -->
+            <div class="upload-dropzone" id="dropzone">
                 <input 
                     type="file" 
                     id="file-input" 
                     name="file" 
                     accept="application/pdf"
                     required
+                    style="position: absolute; opacity: 0; width: 100%; height: 100%; cursor: pointer;"
                 >
-                <small class="form-help">Solo file PDF sono supportati. Massimo 10MB.</small>
+                <div class="upload-dropzone-icon">📄</div>
+                <div class="upload-dropzone-text">Trascina qui il documento DDT</div>
+                <div class="upload-dropzone-hint">oppure clicca per selezionare un file PDF</div>
+                <div class="upload-dropzone-hint" style="margin-top: var(--spacing-sm); font-size: 0.875em;">Massimo 10MB</div>
             </div>
 
             <div id="file-info" class="file-info hidden">
                 <div class="file-preview">
-                    <span class="file-icon"></span>
+                    <span class="file-icon">📄</span>
                     <div class="file-details">
                         <div class="file-name" id="file-name"></div>
                         <div class="file-size" id="file-size"></div>
                     </div>
-                    <button type="button" class="btn-remove" id="btn-remove" aria-label="Rimuovi file">×</button>
+                    <button type="button" class="btn btn-error" id="btn-remove" aria-label="Rimuovi file">×</button>
                 </div>
             </div>
 
-            <button type="submit" class="btn btn-primary" id="submit-btn">
-                <span id="btn-text">Estrai e Anteprima</span>
-                <span id="btn-spinner" class="spinner hidden"></span>
-            </button>
-    </form>
+            <div style="text-align: center; margin-top: var(--spacing-lg);">
+                <button type="submit" class="btn btn-primary" id="submit-btn" style="min-width: 200px;">
+                    <span id="btn-text">Estrai e Anteprima</span>
+                    <span id="btn-spinner" class="spinner hidden"></span>
+                </button>
+            </div>
+        </form>
     </div>
 
     <div class="card">
@@ -91,24 +97,50 @@
             return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
         }
 
+        const dropzone = document.getElementById('dropzone');
+        
+        // Gestione drag & drop
+        dropzone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropzone.classList.add('drag-over');
+        });
+        
+        dropzone.addEventListener('dragleave', () => {
+            dropzone.classList.remove('drag-over');
+        });
+        
+        dropzone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropzone.classList.remove('drag-over');
+            
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                fileInput.files = files;
+                fileInput.dispatchEvent(new Event('change'));
+            }
+        });
+        
         fileInput.addEventListener('change', (e) => {
             const file = e.target.files[0];
             if (file) {
                 if (file.type !== 'application/pdf') {
                     showMessage('Solo file PDF sono supportati', 'error');
                     fileInput.value = '';
+                    dropzone.classList.remove('drag-over');
                     return;
                 }
 
                 if (file.size > 10 * 1024 * 1024) {
                     showMessage('Il file è troppo grande. Massimo 10MB', 'error');
                     fileInput.value = '';
+                    dropzone.classList.remove('drag-over');
                     return;
                 }
 
                 fileName.textContent = file.name;
                 fileSize.textContent = formatFileSize(file.size);
                 fileInfo.classList.remove('hidden');
+                dropzone.style.display = 'none';
                 hideMessage();
             }
         });
@@ -116,6 +148,7 @@
         btnRemove.addEventListener('click', () => {
             fileInput.value = '';
             fileInfo.classList.add('hidden');
+            dropzone.style.display = 'flex';
             hideMessage();
         });
 
@@ -208,6 +241,7 @@
                         // Reset form
                         form.reset();
                         fileInfo.classList.add('hidden');
+                        dropzone.style.display = 'flex';
                         
                         // Opzionalmente, mostra il modal con stato QUEUED
                         await ensureModalReady();
@@ -258,6 +292,7 @@
                             // Reset form dopo aver mostrato il modal
                             form.reset();
                             fileInfo.classList.add('hidden');
+                            dropzone.style.display = 'flex';
                         } catch (modalError) {
                             console.error('Errore durante show modal:', modalError);
                             showMessage('Errore durante la visualizzazione dell\'anteprima: ' + modalError.message, 'error');

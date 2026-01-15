@@ -16,64 +16,30 @@
         min-height: 100vh;
         display: flex;
         flex-direction: column;
-        background: linear-gradient(135deg, var(--oceano-profondo) 0%, var(--oceano-medio) 50%, var(--oceano-chiaro) 100%);
+        background: linear-gradient(135deg, var(--color-primary-dark) 0%, var(--color-primary) 50%, var(--color-primary-light) 100%);
         position: relative;
         overflow: hidden;
     }
     
-    /* Animazione onde di sfondo */
-    body.login-page::before {
-        content: '';
-        position: absolute;
-        bottom: 0;
-        left: 0;
-        width: 100%;
-        height: 40%;
-        background: linear-gradient(to top, rgba(44, 116, 179, 0.3) 0%, transparent 100%);
-        animation: wave 8s ease-in-out infinite;
-        z-index: 0;
-    }
-    
-    body.login-page::after {
-        content: '';
-        position: absolute;
-        bottom: 0;
-        left: 0;
-        width: 100%;
-        height: 35%;
-        background: linear-gradient(to top, rgba(32, 82, 149, 0.2) 0%, transparent 100%);
-        animation: wave 10s ease-in-out infinite reverse;
-        z-index: 0;
-    }
-    
-    @keyframes wave {
-        0%, 100% {
-            transform: translateY(0) scaleY(1);
-        }
-        50% {
-            transform: translateY(-10px) scaleY(1.05);
-        }
-    }
-    
     /* Header personalizzato per login */
     body.login-page header {
-        background: rgba(10, 38, 71, 0.9);
+        background: rgba(30, 64, 175, 0.95);
         backdrop-filter: blur(10px);
         border-bottom: 2px solid rgba(255, 255, 255, 0.1);
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        box-shadow: var(--shadow-lg);
         position: relative;
         z-index: 10;
     }
     
     body.login-page header h1 {
-        color: var(--schiuma-bianca);
+        color: var(--color-surface);
         text-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
     }
     
     /* Footer trasparente */
     body.login-page footer {
         background: transparent;
-        color: rgba(255, 255, 255, 0.7);
+        color: rgba(255, 255, 255, 0.8);
         margin-top: auto;
         position: relative;
         z-index: 10;
@@ -97,49 +63,18 @@
         backdrop-filter: blur(20px);
         padding: var(--spacing-xxl) var(--spacing-xl);
         border-radius: var(--radius-xl);
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1);
+        box-shadow: var(--shadow-xl), 0 0 0 1px rgba(255, 255, 255, 0.1);
         max-width: 450px;
         width: 100%;
         position: relative;
-        animation: fadeInUp 0.6s ease-out;
-        border: 2px solid rgba(44, 116, 179, 0.2);
-    }
-    
-    @keyframes fadeInUp {
-        from {
-            opacity: 0;
-            transform: translateY(30px);
-        }
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
-    }
-    
-    /* Effetto glow sulla card */
-    .login-card::before {
-        content: '';
-        position: absolute;
-        top: -2px;
-        left: -2px;
-        right: -2px;
-        bottom: -2px;
-        background: linear-gradient(135deg, var(--acqua-azzurra), var(--oceano-medio), var(--onda-verde));
-        border-radius: var(--radius-xl);
-        opacity: 0;
-        z-index: -1;
-        transition: opacity 0.5s ease;
-    }
-    
-    .login-card:hover::before {
-        opacity: 0.3;
+        border: 2px solid rgba(37, 99, 235, 0.2);
     }
     
     /* Titolo login */
     .login-title {
         text-align: center;
         margin-bottom: var(--spacing-xl);
-        color: var(--oceano-profondo);
+        color: var(--color-text);
         font-size: 2em;
         font-weight: 700;
         position: relative;
@@ -170,7 +105,7 @@
         align-items: center;
         gap: var(--spacing-sm);
         margin-bottom: var(--spacing-sm);
-        color: var(--oceano-profondo);
+        color: var(--color-text);
         font-weight: 600;
         font-size: 0.95em;
     }
@@ -183,21 +118,21 @@
     .input-wrapper input[type="password"] {
         width: 100%;
         padding: 14px 16px 14px 45px;
-        border: 2px solid var(--perla);
+        border: 2px solid var(--color-border);
         border-radius: var(--radius-md);
         font-family: inherit;
         font-size: 15px;
         transition: all var(--transition-normal);
-        background: var(--schiuma-bianca);
-        color: var(--oceano-profondo);
-        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+        background: var(--color-surface);
+        color: var(--color-text);
+        box-shadow: var(--shadow-sm);
     }
     
     .input-wrapper input[type="text"]:focus,
     .input-wrapper input[type="password"]:focus {
         outline: none;
-        border-color: var(--acqua-azzurra);
-        box-shadow: 0 0 0 4px rgba(44, 116, 179, 0.15), 0 4px 12px rgba(0, 0, 0, 0.1);
+        border-color: var(--color-primary);
+        box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.15), var(--shadow-md);
         transform: translateY(-1px);
     }
     
@@ -208,14 +143,14 @@
         top: 50%;
         transform: translateY(-50%);
         font-size: 1.3em;
-        color: var(--oceano-medio);
+        color: var(--color-text-secondary);
         pointer-events: none;
         transition: color var(--transition-normal);
         z-index: 1;
     }
     
     .input-wrapper:focus-within .input-icon {
-        color: var(--acqua-azzurra);
+        color: var(--color-primary);
     }
     
     /* Toggle password */
@@ -228,7 +163,7 @@
         border: none;
         font-size: 1.2em;
         cursor: pointer;
-        color: var(--oceano-medio);
+        color: var(--color-text-secondary);
         transition: all var(--transition-normal);
         z-index: 1;
         padding: 5px;
@@ -236,8 +171,8 @@
     }
     
     .password-toggle:hover {
-        color: var(--acqua-azzurra);
-        background: rgba(44, 116, 179, 0.1);
+        color: var(--color-primary);
+        background: rgba(37, 99, 235, 0.1);
         transform: translateY(-50%) scale(1.1);
     }
     
