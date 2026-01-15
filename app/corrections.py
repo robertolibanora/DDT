@@ -34,14 +34,22 @@ def _load_corrections() -> Dict[str, Any]:
     """
     Carica le correzioni dal file JSON
     
+    IMPORTANTE: NON maschera OSError/IOError su path critici (corrections directory).
+    Se la directory non è scrivibile, OSError viene propagato esplicitamente.
+    
     Returns:
         Dizionario con tutte le correzioni
+        
+    Raises:
+        OSError: Se la directory corrections non è scrivibile o non può essere creata
+        IOError: Se c'è un errore di I/O con il file
     """
     global _corrections_cache
     
     if _corrections_cache is not None:
         return _corrections_cache
     
+    # _ensure_corrections_dir() chiama ensure_dir() che può sollevare OSError
     _ensure_corrections_dir()
     
     if not CORRECTIONS_FILE.exists():
@@ -53,6 +61,10 @@ def _load_corrections() -> Dict[str, Any]:
         }
         try:
             _save_corrections(_corrections_cache)
+        except (OSError, IOError, PermissionError) as e:
+            # Errori di I/O su path critici: propaga esplicitamente
+            logger.error("Errore salvataggio file correzioni vuoto: %s", str(e))
+            raise
         except Exception as e:
             logger.warning("Errore salvataggio file correzioni vuoto: %s - continuo senza blocchi", str(e))
         return _corrections_cache
@@ -61,14 +73,14 @@ def _load_corrections() -> Dict[str, Any]:
         with open(CORRECTIONS_FILE, 'r', encoding='utf-8') as f:
             file_content = f.read()
             if not file_content.strip():
-                logger.warning("❌ [ANTI-CRASH] File correzioni è vuoto: %s - uso valori safe di default", str(CORRECTIONS_FILE))
+                logger.warning("File correzioni è vuoto: %s - uso valori safe di default", str(CORRECTIONS_FILE))
                 _corrections_cache = {"corrections": {}, "learning_patterns": {}, "auto_rules_created": []}
                 return _corrections_cache
             _corrections_cache = json.loads(file_content)
         
         # Validazione struttura: assicura che sia un dict con chiavi corrette
         if not isinstance(_corrections_cache, dict):
-            logger.error("❌ [ANTI-CRASH] File correzioni non contiene un dict valido: %s - uso valori safe di default", str(CORRECTIONS_FILE))
+            logger.error("File correzioni non contiene un dict valido: %s - uso valori safe di default", str(CORRECTIONS_FILE))
             _corrections_cache = {"corrections": {}, "learning_patterns": {}, "auto_rules_created": []}
             return _corrections_cache
         
@@ -82,12 +94,16 @@ def _load_corrections() -> Dict[str, Any]:
         
         logger.info("Caricate %d correzioni", len(_corrections_cache.get('corrections', {})))
         return _corrections_cache
+    except (OSError, IOError, PermissionError) as e:
+        # Errori di I/O su path critici: propaga esplicitamente senza mascherare
+        logger.error("Errore I/O caricamento correzioni: %s", str(e), exc_info=True)
+        raise
     except json.JSONDecodeError as e:
-        logger.error("❌ [ANTI-CRASH] Errore parsing JSON correzioni: %s - uso valori safe di default", str(e))
+        logger.error("Errore parsing JSON correzioni: %s - uso valori safe di default", str(e))
         _corrections_cache = {"corrections": {}, "learning_patterns": {}, "auto_rules_created": []}
         return _corrections_cache
     except Exception as e:
-        logger.error("❌ [ANTI-CRASH] Errore caricamento correzioni: %s - uso valori safe di default", str(e), exc_info=True)
+        logger.error("Errore caricamento correzioni: %s - uso valori safe di default", str(e), exc_info=True)
         _corrections_cache = {"corrections": {}, "learning_patterns": {}, "auto_rules_created": []}
         return _corrections_cache
 

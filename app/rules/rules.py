@@ -22,8 +22,15 @@ def _load_rules() -> Dict[str, Any]:
     """
     Carica le regole dal file JSON (thread-safe)
     
+    IMPORTANTE: NON maschera OSError/IOError su path critici (rules directory).
+    Se la directory non è scrivibile, OSError viene propagato esplicitamente.
+    
     Returns:
         Dizionario con tutte le regole
+        
+    Raises:
+        OSError: Se la directory rules non è scrivibile o non può essere creata
+        IOError: Se c'è un errore di I/O con il file
     """
     global _rules_cache
     
@@ -41,6 +48,10 @@ def _load_rules() -> Dict[str, Any]:
             _rules_cache = {}
             try:
                 _save_rules(_rules_cache)
+            except (OSError, IOError, PermissionError) as e:
+                # Errori di I/O su path critici: propaga esplicitamente
+                logger.error("Errore salvataggio file regole vuoto: %s", str(e))
+                raise
             except Exception as e:
                 logger.warning("Errore salvataggio file regole vuoto: %s - continuo senza blocchi", str(e))
             return _rules_cache
@@ -49,25 +60,29 @@ def _load_rules() -> Dict[str, Any]:
             with open(RULES_FILE, 'r', encoding='utf-8') as f:
                 file_content = f.read()
                 if not file_content.strip():
-                    logger.warning("❌ [ANTI-CRASH] File regole è vuoto: %s - uso valori safe di default", str(RULES_FILE))
+                    logger.warning("File regole è vuoto: %s - uso valori safe di default", str(RULES_FILE))
                     _rules_cache = {}
                     return _rules_cache
                 _rules_cache = json.loads(file_content)
             
             # Validazione struttura: assicura che sia un dict
             if not isinstance(_rules_cache, dict):
-                logger.error("❌ [ANTI-CRASH] File regole non contiene un dict valido: %s - uso valori safe di default", str(RULES_FILE))
+                logger.error("File regole non contiene un dict valido: %s - uso valori safe di default", str(RULES_FILE))
                 _rules_cache = {}
                 return _rules_cache
             
             logger.info("Caricate %d regole da %s", len(_rules_cache), str(RULES_FILE))
             return _rules_cache
+        except (OSError, IOError, PermissionError) as e:
+            # Errori di I/O su path critici: propaga esplicitamente senza mascherare
+            logger.error("Errore I/O caricamento regole: %s", str(e), exc_info=True)
+            raise
         except json.JSONDecodeError as e:
-            logger.error("❌ [ANTI-CRASH] Errore parsing JSON regole: %s - uso valori safe di default", str(e))
+            logger.error("Errore parsing JSON regole: %s - uso valori safe di default", str(e))
             _rules_cache = {}
             return _rules_cache
         except Exception as e:
-            logger.error("❌ [ANTI-CRASH] Errore caricamento regole: %s - uso valori safe di default", str(e), exc_info=True)
+            logger.error("Errore caricamento regole: %s - uso valori safe di default", str(e), exc_info=True)
             _rules_cache = {}
             return _rules_cache
 
@@ -76,25 +91,37 @@ def _save_rules(rules: Dict[str, Any]) -> None:
     """
     Salva le regole nel file JSON (thread-safe)
     
+    IMPORTANTE: Usa ensure_dir() per garantire che la directory sia scrivibile.
+    Se la directory non è scrivibile, OSError viene propagato esplicitamente.
+    
     Args:
         rules: Dizionario con tutte le regole
+        
+    Raises:
+        OSError: Se la directory rules non è scrivibile o non può essere creata
+        IOError: Se c'è un errore di I/O durante la scrittura
     """
     global _rules_cache
     
     with _rules_lock:
         try:
-            # Crea la directory se non esiste
-            RULES_FILE.parent.mkdir(parents=True, exist_ok=True)
+            # Usa ensure_dir() per garantire che la directory sia scrivibile
+            # ensure_dir() solleverà OSError se la directory non è scrivibile
+            from app.paths import ensure_dir
+            ensure_dir(RULES_FILE.parent)
             
             with open(RULES_FILE, 'w', encoding='utf-8') as f:
                 json.dump(rules, f, indent=2, ensure_ascii=False)
             
             # Aggiorna la cache
             _rules_cache = rules.copy()
-            logger.info(f"Regole salvate in {RULES_FILE}")
-        except Exception as e:
-            logger.error(f"Errore salvataggio regole: {e}", exc_info=True)
+            logger.info("Regole salvate in %s", str(RULES_FILE))
+        except (OSError, IOError, PermissionError):
+            # Errori di I/O su path critici: propaga esplicitamente senza mascherare
             raise
+        except Exception as e:
+            logger.error("Errore salvataggio regole: %s", str(e), exc_info=True)
+            raise IOError(f"Errore salvataggio regole: {e}") from e
 
 
 def reload_rules() -> None:

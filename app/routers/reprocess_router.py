@@ -106,17 +106,31 @@ async def reprocess_ddt(numero_documento: str, http_request: Request, request_da
                 "updated": was_updated
             }
             
+        except (OSError, IOError, PermissionError) as e:
+            # Errori di I/O su path critici: solleva HTTPException 500 esplicito
+            logger.error("Errore I/O durante reprocessing: %s", str(e), exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Errore accesso directory Excel: {str(e)}. Verifica i permessi di scrittura su /var/www/DDT/excel"
+            )
         except ValueError as e:
-            logger.error(f"Errore validazione durante reprocessing: {e}")
+            logger.error("Errore validazione durante reprocessing: %s", str(e))
             raise HTTPException(status_code=422, detail=f"Dati estratti non validi: {str(e)}")
         except Exception as e:
-            logger.error(f"Errore durante reprocessing: {e}", exc_info=True)
+            logger.error("Errore durante reprocessing: %s", str(e), exc_info=True)
             raise HTTPException(status_code=500, detail=f"Errore durante il reprocessing: {str(e)}")
             
     except HTTPException:
         raise
+    except (OSError, IOError, PermissionError) as e:
+        # Errori di I/O su path critici: solleva HTTPException 500 esplicito
+        logger.error("Errore I/O durante reprocessing: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Errore accesso directory Excel: {str(e)}. Verifica i permessi di scrittura su /var/www/DDT/excel"
+        )
     except Exception as e:
-        logger.error(f"Errore generico durante reprocessing: {e}", exc_info=True)
+        logger.error("Errore generico durante reprocessing: %s", str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=f"Errore durante il reprocessing: {str(e)}")
 
 
@@ -158,7 +172,7 @@ async def reprocess_by_file(http_request: Request, request_data: Dict[str, Any],
         except Exception as e:
             logger.warning(f"Errore finalizzazione documento dopo reprocess by-file: {e}")
         
-        logger.info(f"DDT '{numero_documento}' riprocessato con successo ({action})")
+        logger.info("DDT '%s' riprocessato con successo (%s)", numero_documento, action)
         
         return {
             "success": True,
@@ -167,10 +181,17 @@ async def reprocess_by_file(http_request: Request, request_data: Dict[str, Any],
             "updated": was_updated
         }
         
+    except (OSError, IOError, PermissionError) as e:
+        # Errori di I/O su path critici: solleva HTTPException 500 esplicito
+        logger.error("Errore I/O durante reprocessing by-file: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Errore accesso directory Excel: {str(e)}. Verifica i permessi di scrittura su /var/www/DDT/excel"
+        )
     except ValueError as e:
-        logger.error(f"Errore validazione durante reprocessing: {e}")
+        logger.error("Errore validazione durante reprocessing: %s", str(e))
         raise HTTPException(status_code=422, detail=f"Dati estratti non validi: {str(e)}")
     except Exception as e:
-        logger.error(f"Errore durante reprocessing: {e}", exc_info=True)
+        logger.error("Errore durante reprocessing: %s", str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=f"Errore durante il reprocessing: {str(e)}")
 

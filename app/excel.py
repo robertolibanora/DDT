@@ -310,12 +310,20 @@ def read_excel_as_dict() -> Dict[str, List[Dict[str, Any]]]:
     """
     Legge tutto il contenuto del file Excel e restituisce un dizionario
     
+    IMPORTANTE: NON maschera OSError/IOError su path critici (excel directory).
+    Se la directory non è scrivibile, OSError viene propagato esplicitamente.
+    
     Returns:
         Dizionario con chiave 'rows' contenente lista di righe
+        
+    Raises:
+        OSError: Se la directory excel non è scrivibile
+        IOError: Se c'è un errore di I/O con il file
         
     Note:
         Thread-safe, ma non modifica il file
     """
+    # _ensure_excel_exists() può sollevare OSError se directory non scrivibile
     _ensure_excel_exists()
     
     try:
@@ -325,7 +333,8 @@ def read_excel_as_dict() -> Dict[str, List[Dict[str, Any]]]:
                 wb = load_workbook(str(get_excel_file()), data_only=True)
                 ws = wb.active
             except (InvalidFileException, FileNotFoundError) as e:
-                logger.warning(f"File Excel non leggibile: {e}, restituisco lista vuota")
+                # File non valido o non trovato: può essere normale se appena creato
+                logger.warning("File Excel non leggibile: %s, restituisco lista vuota", str(e))
                 return {"rows": []}
             
             rows = []
@@ -362,12 +371,16 @@ def read_excel_as_dict() -> Dict[str, List[Dict[str, Any]]]:
                 
                 rows.append(row_dict)
             
-            logger.debug(f"Letti {len(rows)} DDT da Excel (ordinati dal più recente)")
+            logger.debug("Letti %d DDT da Excel (ordinati dal più recente)", len(rows))
             return {"rows": rows}
             
+    except (OSError, IOError, PermissionError):
+        # Errori di I/O su path critici: propaga esplicitamente senza mascherare
+        raise
     except Exception as e:
-        logger.error(f"Errore lettura Excel: {e}", exc_info=True)
-        return {"rows": []}
+        # Altri errori: propaga comunque come IOError
+        logger.error("Errore lettura Excel: %s", str(e), exc_info=True)
+        raise IOError(f"Errore lettura Excel: {e}") from e
 
 
 def clear_all_ddt() -> Dict[str, Any]:
@@ -418,25 +431,43 @@ def clear_all_ddt() -> Dict[str, Any]:
                     "rows_deleted": rows_before,
                     "message": f"Cancellati {rows_before} DDT con successo"
                 }
-            except PermissionError:
-                logger.error(f"Errore: file Excel è aperto da un altro programma")
-                raise IOError("Il file Excel è aperto. Chiudilo e riprova.")
+            except PermissionError as e:
+                logger.error("Errore: file Excel è aperto da un altro programma")
+                raise IOError("Il file Excel è aperto. Chiudilo e riprova.") from e
+            except (OSError, IOError) as e:
+                # Errori di I/O: propaga esplicitamente
+                logger.error("Errore salvataggio Excel: %s", str(e))
+                raise
             except Exception as e:
-                logger.error(f"Errore salvataggio Excel: {e}")
-                raise IOError(f"Errore durante il salvataggio: {str(e)}")
+                logger.error("Errore salvataggio Excel: %s", str(e))
+                raise IOError(f"Errore durante il salvataggio: {str(e)}") from e
         
+    except (OSError, IOError, PermissionError):
+        # Errori di I/O su path critici: propaga esplicitamente senza mascherare
+        raise
+    except ValueError:
+        # Errori di validazione: propaga esplicitamente
+        raise
     except Exception as e:
-        logger.error(f"Errore cancellazione DDT: {e}", exc_info=True)
-        raise ValueError(f"Errore durante la cancellazione: {str(e)}") from e
+        logger.error("Errore cancellazione DDT: %s", str(e), exc_info=True)
+        raise IOError(f"Errore durante la cancellazione: {str(e)}") from e
 
 
 def get_excel_stats() -> Dict[str, Any]:
     """
     Ottiene statistiche dal file Excel senza caricare tutti i dati
     
+    IMPORTANTE: NON maschera OSError/IOError su path critici (excel directory).
+    Se la directory non è scrivibile, OSError viene propagato esplicitamente.
+    
     Returns:
         Dizionario con statistiche (totale_righe, ultima_modifica, ecc.)
+        
+    Raises:
+        OSError: Se la directory excel non è scrivibile
+        IOError: Se c'è un errore di I/O con il file
     """
+    # _ensure_excel_exists() può sollevare OSError se directory non scrivibile
     _ensure_excel_exists()
     
     try:
@@ -457,6 +488,10 @@ def get_excel_stats() -> Dict[str, Any]:
                 "file_exists": True,
                 "last_modified": excel_file.stat().st_mtime if excel_file.exists() else None,
             }
+    except (OSError, IOError, PermissionError):
+        # Errori di I/O su path critici: propaga esplicitamente senza mascherare
+        raise
     except Exception as e:
-        logger.error(f"Errore calcolo statistiche Excel: {e}")
-        return {"total_rows": 0, "file_exists": False, "error": str(e)}
+        # Altri errori: propaga comunque come IOError
+        logger.error("Errore calcolo statistiche Excel: %s", str(e), exc_info=True)
+        raise IOError(f"Errore calcolo statistiche Excel: {e}") from e

@@ -346,12 +346,18 @@ class DDTHandler(FileSystemEventHandler):
                 for row in existing_data.get("rows", []):
                     if (row.get("numero_documento") == data.get("numero_documento") and 
                         row.get("mittente", "").strip() == data.get("mittente", "").strip()):
-                        logger.info(f"⏭️ DDT già presente in Excel (numero: {data.get('numero_documento')}), marco come FINALIZED - {Path(file_path).name}")
+                        logger.info("⏭️ DDT già presente in Excel (numero: %s), marco come FINALIZED - %s", 
+                                  data.get('numero_documento'), Path(file_path).name)
                         from app.processed_documents import mark_document_finalized
                         mark_document_finalized(doc_hash)
                         return
+            except (OSError, IOError, PermissionError) as e:
+                # Errori di I/O su path critici: logga ma continua (non bloccare il processing)
+                # Questo è in un thread daemon, quindi non possiamo sollevare HTTPException
+                logger.error("Errore I/O controllo Excel (path critico): %s - continuo processing", str(e))
+                # Continua comunque
             except Exception as e:
-                logger.debug(f"Errore controllo Excel: {e}")
+                logger.debug("Errore controllo Excel: %s", str(e))
                 # Continua comunque
             
             # Converti PDF in base64
@@ -479,9 +485,17 @@ async def lifespan(app: FastAPI):
     # Tutte le operazioni lunghe vengono spostate in thread daemon
     
     # Assicurati che la cartella inbox esista (usando sistema paths centralizzato)
-    from app.paths import get_inbox_dir
-    inbox_path = get_inbox_dir()
-    logger.info(f"{role_label} Cartella inbox verificata: {inbox_path}")
+    # Se la directory non è scrivibile, get_inbox_dir() solleverà OSError esplicitamente
+    # Questo è CRITICO: il sistema deve fallire chiaramente se i path critici non sono scrivibili
+    try:
+        from app.paths import get_inbox_dir
+        inbox_path = get_inbox_dir()
+        logger.info("%s Cartella inbox verificata: %s", role_label, str(inbox_path))
+    except (OSError, IOError, PermissionError) as e:
+        # Path critico non scrivibile: logga e rilancia (il sistema deve fermarsi)
+        logger.critical("%s ERRORE CRITICO: Directory inbox non scrivibile: %s", role_label, str(e))
+        logger.critical("%s Il sistema non può funzionare senza directory inbox scrivibile", role_label)
+        raise
     
     # Sposta operazioni lunghe in thread daemon (NON bloccanti)
     # SOLO per ruoli web: task leggeri (migrazione, layout models, cleanup coda)
@@ -1416,19 +1430,28 @@ async def set_output_date(
 
 @app.post("/data/clear")
 async def delete_all_ddt(request: Request, auth: bool = Depends(check_auth)):
-    """Endpoint per cancellare tutti i DDT dal file Excel"""
+    """
+    Endpoint per cancellare tutti i DDT dal file Excel
+    
+    IMPORTANTE: NON maschera OSError su path critici (excel directory).
+    Se la directory non è scrivibile, solleva HTTPException 500 esplicito.
+    """
     try:
         result = clear_all_ddt()
-        logger.info(f"Tutti i DDT cancellati: {result.get('rows_deleted', 0)} righe")
+        logger.info("Tutti i DDT cancellati: %d righe", result.get('rows_deleted', 0))
         return result
+    except (OSError, IOError, PermissionError) as e:
+        # Errori di I/O su path critici: solleva HTTPException 500 esplicito
+        logger.error("Errore I/O durante cancellazione: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Errore accesso directory Excel: {str(e)}. Verifica i permessi di scrittura su /var/www/DDT/excel"
+        )
     except ValueError as e:
-        logger.error(f"Errore validazione durante cancellazione: {e}")
+        logger.error("Errore validazione durante cancellazione: %s", str(e))
         raise HTTPException(status_code=400, detail=str(e))
-    except IOError as e:
-        logger.error(f"Errore I/O durante cancellazione: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
-        logger.error(f"Errore durante la cancellazione: {e}", exc_info=True)
+        logger.error("Errore durante la cancellazione: %s", str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=f"Errore durante la cancellazione: {str(e)}")
 
 if __name__ == "__main__":

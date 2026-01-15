@@ -446,11 +446,18 @@ async def save_preview(
         
         return JSONResponse(response_data)
         
+    except (OSError, IOError, PermissionError) as e:
+        # Errori di I/O su path critici: solleva HTTPException 500 esplicito
+        logger.error("Errore I/O durante salvataggio anteprima: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Errore accesso directory Excel: {str(e)}. Verifica i permessi di scrittura su /var/www/DDT/excel"
+        )
     except ValueError as e:
-        logger.error(f"Errore validazione durante salvataggio anteprima: {e}")
+        logger.error("Errore validazione durante salvataggio anteprima: %s", str(e))
         raise HTTPException(status_code=422, detail=f"Dati non validi: {str(e)}")
     except Exception as e:
-        logger.error(f"Errore durante salvataggio anteprima: {e}", exc_info=True)
+        logger.error("Errore durante salvataggio anteprima: %s", str(e), exc_info=True)
         raise HTTPException(status_code=500, detail=f"Errore durante il salvataggio: {str(e)}")
 
 
