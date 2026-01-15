@@ -30,11 +30,6 @@ from app.auth import (
 from fastapi import FastAPI
 from typing import Optional
 
-app = FastAPI()
-
-@app.get("/health", include_in_schema=False)
-def health():
-    return {"status": "ok"}
 # Configura logging
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -521,6 +516,11 @@ async def lifespan(app: FastAPI):
     print("✅ [LIFESPAN] Shutdown completato", flush=True)
 
 app = FastAPI(lifespan=lifespan)
+
+@app.get("/health", include_in_schema=False)
+def health():
+    return {"status": "ok"}
+
 from app.paths import get_app_dir
 templates = Jinja2Templates(directory=str(get_app_dir() / "templates"))
 
