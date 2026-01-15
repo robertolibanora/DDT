@@ -85,7 +85,7 @@ class PreviewModal {
                                 </div>
                             </div>
                             
-                            <div class="layout-trainer-link-container">
+                            <div class="layout-trainer-link-container hidden">
                                 <a id="layout-trainer-link" href="#">
                                     ✏️ Insegna Layout di questo Documento
                                 </a>
@@ -192,6 +192,53 @@ class PreviewModal {
         this.setupModelDetection();
     }
 
+    /**
+     * Funzione centralizzata per gestire la visibilità dei banner UI
+     * Basata sullo stato del documento: modello riconosciuto, layout conosciuto, ecc.
+     * 
+     * @param {Object} options - Opzioni per determinare la visibilità
+     * @param {boolean} options.modelRecognized - Se un modello è stato riconosciuto/applicato
+     * @param {boolean} options.hasLayoutModel - Se esiste un layout model valido (da backend)
+     * @param {boolean} options.hasExtractedData - Se ci sono dati estratti disponibili
+     */
+    updateBannerVisibility({ modelRecognized = false, hasLayoutModel = null, hasExtractedData = true }) {
+        const suggestBanner = document.getElementById('suggest-layout-banner');
+        const layoutTrainerLink = document.getElementById('layout-trainer-link');
+        const layoutTrainerContainer = document.querySelector('.layout-trainer-link-container');
+        
+        // Determina se mostrare il banner "suggest-layout-banner"
+        // REGOLA: Mostra SOLO se:
+        // 1. Ci sono dati estratti
+        // 2. NON c'è un modello riconosciuto/applicato
+        // 3. NON c'è un layout model valido (hasLayoutModel === false)
+        const shouldShowSuggestBanner = hasExtractedData 
+            && !modelRecognized 
+            && (hasLayoutModel === false);
+        
+        if (suggestBanner) {
+            if (shouldShowSuggestBanner) {
+                suggestBanner.classList.remove('hidden');
+            } else {
+                suggestBanner.classList.add('hidden');
+            }
+        }
+        
+        // Determina se mostrare il link "layout-trainer-link"
+        // REGOLA: Mostra SOLO se:
+        // 1. Ci sono dati estratti
+        // 2. NON c'è un modello riconosciuto/applicato (altrimenti è ridondante)
+        // Il link può essere utile per creare/modificare layout anche quando non c'è modello
+        const shouldShowLayoutTrainerLink = hasExtractedData && !modelRecognized;
+        
+        if (layoutTrainerContainer) {
+            if (shouldShowLayoutTrainerLink) {
+                layoutTrainerContainer.classList.remove('hidden');
+            } else {
+                layoutTrainerContainer.classList.add('hidden');
+            }
+        }
+    }
+
     setupModelDetection() {
         // Seleziona modello manualmente
         const modelSelect = document.getElementById('model-select');
@@ -289,10 +336,25 @@ class PreviewModal {
                     if (applyBtn) {
                         applyBtn.disabled = false;
                     }
+                    
+                    // Aggiorna visibilità banner: modello riconosciuto = nascondi banner
+                    this.updateBannerVisibility({
+                        modelRecognized: true,
+                        hasLayoutModel: true, // Se riconosciuto, assumiamo layout valido
+                        hasExtractedData: true
+                    });
                 } else {
                     // Nessun modello riconosciuto, mostra solo selezione manuale
                     statusEl.classList.add('hidden');
                     selectionEl.classList.remove('hidden');
+                    
+                    // Aggiorna visibilità banner: nessun modello = mostra banner se necessario
+                    // hasLayoutModel viene passato dalla funzione show()
+                    this.updateBannerVisibility({
+                        modelRecognized: false,
+                        hasLayoutModel: this._lastHasLayoutModel, // Usa valore salvato
+                        hasExtractedData: true
+                    });
                 }
             }
         } catch (error) {
@@ -300,6 +362,13 @@ class PreviewModal {
             statusEl.innerHTML = '<span class="model-detection-error">❌ Errore rilevamento modello</span>';
             // Mostra comunque la selezione manuale
             selectionEl.classList.remove('hidden');
+            
+            // Aggiorna visibilità banner: errore = nessun modello riconosciuto
+            this.updateBannerVisibility({
+                modelRecognized: false,
+                hasLayoutModel: this._lastHasLayoutModel,
+                hasExtractedData: true
+            });
         }
     }
 
@@ -374,6 +443,13 @@ class PreviewModal {
                         appliedNameEl.textContent = data.model_applied?.name || modelId;
                     }
                 }
+                
+                // Aggiorna visibilità banner: modello applicato = nascondi banner
+                this.updateBannerVisibility({
+                    modelRecognized: true,
+                    hasLayoutModel: true, // Modello applicato = layout valido
+                    hasExtractedData: true
+                });
             }
         } catch (error) {
             console.error('Errore applicazione modello:', error);
@@ -489,6 +565,9 @@ class PreviewModal {
         if (fileNameEl) fileNameEl.value = fileName || '';
         if (originalDataEl) originalDataEl.value = hasExtractedData ? JSON.stringify(extractedData) : '';
         
+        // Salva hasLayoutModel per uso successivo (quando detectModel completa)
+        this._lastHasLayoutModel = hasLayoutModel;
+        
         // Aggiorna link layout trainer (solo se abbiamo dati estratti)
         const layoutTrainerLink = document.getElementById('layout-trainer-link');
         if (layoutTrainerLink && fileHash && hasExtractedData) {
@@ -544,6 +623,13 @@ class PreviewModal {
                 const selectionEl = document.getElementById('model-selection');
                 if (statusEl) statusEl.classList.add('hidden');
                 if (selectionEl) selectionEl.classList.remove('hidden');
+                
+                // Aggiorna visibilità banner: nessun mittente = nessun modello possibile
+                this.updateBannerVisibility({
+                    modelRecognized: false,
+                    hasLayoutModel: this._lastHasLayoutModel,
+                    hasExtractedData: true
+                });
             }
         } else {
             // Nessun dato estratto disponibile (QUEUED/PROCESSING)
@@ -584,40 +670,25 @@ class PreviewModal {
             if (selectionEl) selectionEl.classList.add('hidden');
         }
 
-        // Mostra/nascondi banner suggerimento layout model (solo se abbiamo dati estratti)
-        // Il banner appare SOLO se:
-        // - has_layout_model === false (più esplicito, preferito)
-        // - OPPURE extraction_mode == AI_FALLBACK (suggestCreateLayout == true, backward compatibility)
-        // NON appare per LAYOUT_MODEL o HYBRID_LAYOUT_AI (has_layout_model === true)
-        const suggestBanner = document.getElementById('suggest-layout-banner');
-        if (suggestBanner) {
-            if (hasExtractedData) {
-                // Determina se mostrare il banner:
-                // - Se hasLayoutModel è definito, usa quello (false = mostra banner)
-                // - Altrimenti fallback a suggestCreateLayout (true = mostra banner)
-                const shouldShowBanner = hasLayoutModel !== null 
-                    ? (hasLayoutModel === false) 
-                    : (suggestCreateLayout === true);
-                
-                if (shouldShowBanner) {
-                    suggestBanner.classList.remove('hidden');
-                    // Setup CTA button
-                    const createLayoutBtn = document.getElementById('create-layout-btn');
-                    if (createLayoutBtn) {
-                        createLayoutBtn.onclick = () => {
-                            const supplier = extractedData?.mittente || '';
-                            const url = `/layout-trainer?hash=${fileHash}${supplier ? '&supplier=' + encodeURIComponent(supplier) : ''}`;
-                            window.location.href = url;
-                        };
-                    }
-                } else {
-                    suggestBanner.classList.add('hidden');
-                }
-            } else {
-                // Nessun dato estratto, nascondi banner
-                suggestBanner.classList.add('hidden');
-            }
+        // Setup CTA button per banner (se verrà mostrato)
+        const createLayoutBtn = document.getElementById('create-layout-btn');
+        if (createLayoutBtn) {
+            createLayoutBtn.onclick = () => {
+                const supplier = extractedData?.mittente || '';
+                const url = `/layout-trainer?hash=${fileHash}${supplier ? '&supplier=' + encodeURIComponent(supplier) : ''}`;
+                window.location.href = url;
+            };
         }
+        
+        // Aggiorna visibilità banner iniziale (prima del riconoscimento modello)
+        // Se hasLayoutModel è true, nascondi banner anche prima del riconoscimento
+        // Altrimenti aspetta il risultato di detectModel()
+        const initialModelRecognized = false; // Non ancora riconosciuto
+        this.updateBannerVisibility({
+            modelRecognized: initialModelRecognized,
+            hasLayoutModel: hasLayoutModel,
+            hasExtractedData: hasExtractedData
+        });
 
         // Mostra messaggio di stato se non abbiamo dati estratti
         const formSection = document.querySelector('.preview-form-section');
@@ -698,9 +769,16 @@ class PreviewModal {
             suggestBanner.classList.add('hidden');
         }
         
+        // Nascondi link layout trainer
+        const layoutTrainerContainer = document.querySelector('.layout-trainer-link-container');
+        if (layoutTrainerContainer) {
+            layoutTrainerContainer.classList.add('hidden');
+        }
+        
         // Reset stato modello
         this.currentModel = null;
         this.availableModels = [];
+        this._lastHasLayoutModel = null;
         
         this.currentData = null;
         this.currentFileHash = null;
