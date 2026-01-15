@@ -21,6 +21,9 @@ _layout_rules_cache_timestamp: Optional[float] = None
 # Soglia di similarità configurabile per fuzzy matching
 LAYOUT_MODEL_SIMILARITY_THRESHOLD = 0.6
 
+# Soglia di similarità geometrica per layout matching (più alta = più rigorosa)
+LAYOUT_GEOMETRY_SIMILARITY_THRESHOLD = 0.85  # 85% di similarità geometrica richiesta
+
 
 def calculate_sender_similarity(sender1: str, sender2: str) -> float:
     """
@@ -373,6 +376,270 @@ def match_layout_rule(
         return None
 
 
+def calculate_layout_signature(rule: LayoutRule) -> List[float]:
+    """
+    Calcola la signature geometrica di un layout rule basata sulle posizioni delle box
+    
+    La signature è un vettore normalizzato che rappresenta la geometria del layout,
+    indipendente dal contenuto testuale. Questo permette di matchare PDF con stesso
+    layout ma dati diversi.
+    
+    Args:
+        rule: LayoutRule da cui calcolare la signature
+        
+    Returns:
+        Lista di float rappresentante la signature geometrica normalizzata
+    """
+    # Ordine standard dei campi per garantire consistenza
+    standard_fields = ['mittente', 'destinatario', 'data', 'numero_documento', 'totale_kg']
+    
+    signature = []
+    
+    # Per ogni campo standard, aggiungi le coordinate normalizzate
+    # Se il campo non è presente nel rule, usa [0, 0, 0, 0] come placeholder
+    for field_name in standard_fields:
+        if field_name in rule.fields:
+            field_box = rule.fields[field_name]
+            # Aggiungi centro e dimensione normalizzati
+            # Centro X, Centro Y, Larghezza, Altezza (tutti in percentuale)
+            center_x = field_box.box.x_pct + (field_box.box.w_pct / 2.0)
+            center_y = field_box.box.y_pct + (field_box.box.h_pct / 2.0)
+            signature.extend([center_x, center_y, field_box.box.w_pct, field_box.box.h_pct])
+        else:
+            # Campo non presente: usa zeri
+            signature.extend([0.0, 0.0, 0.0, 0.0])
+    
+    return signature
+
+
+def extract_pdf_layout_signature(file_path: str, page_count: Optional[int] = None) -> Optional[List[float]]:
+    """
+    Estrae la signature geometrica di un PDF analizzando le posizioni dei testi
+    
+    Usa pdfplumber per trovare le posizioni dei testi che corrispondono ai campi standard.
+    Cerca pattern comuni nei label (es. "Mittente:", "Data:", ecc.) e usa le loro posizioni.
+    
+    Args:
+        file_path: Percorso del file PDF
+        page_count: Numero di pagine (opzionale, usa prima pagina se None)
+        
+    Returns:
+        Lista di float rappresentante la signature geometrica o None se fallito
+    """
+    try:
+        import pdfplumber
+        
+        # Campi standard da cercare con i loro pattern di label
+        field_patterns = {
+            'mittente': [r'mittente', r'da:', r'fornitore', r'spett\.le'],
+            'destinatario': [r'destinatario', r'a:', r'cliente', r'consegna'],
+            'data': [r'data', r'data\s+ddt', r'data\s+documento', r'emissione'],
+            'numero_documento': [r'numero', r'ddt\s+n\.', r'numero\s+ddt', r'documento\s+n\.'],
+            'totale_kg': [r'totale\s+kg', r'peso\s+totale', r'kg\s+complessivi', r'totale\s+peso']
+        }
+        
+        signature = []
+        page_to_use = 0  # Prima pagina (base 0)
+        
+        if page_count and page_count > 1:
+            # Per ora usiamo solo la prima pagina
+            page_to_use = 0
+        
+        with pdfplumber.open(file_path) as pdf:
+            if len(pdf.pages) == 0:
+                return None
+            
+            page = pdf.pages[page_to_use]
+            
+            # Estrai tutti i testi con le loro posizioni
+            words = page.extract_words()
+            
+            if not words:
+                return None
+            
+            # Ottieni dimensioni pagina per normalizzazione
+            page_width = float(page.width)
+            page_height = float(page.height)
+            
+            # Per ogni campo standard, cerca il pattern e estrai posizione
+            for field_name, patterns in field_patterns.items():
+                field_found = False
+                
+                # Cerca pattern nei testi
+                for word in words:
+                    word_text = word.get('text', '').lower()
+                    
+                    # Verifica se il testo corrisponde a uno dei pattern
+                    for pattern in patterns:
+                        import re
+                        if re.search(pattern, word_text, re.IGNORECASE):
+                            # Trovato! Estrai posizione del valore (di solito a destra del label)
+                            x0 = word.get('x0', 0)
+                            y0 = word.get('top', 0)  # pdfplumber usa 'top' invece di 'y0'
+                            x1 = word.get('x1', 0)
+                            bottom = word.get('bottom', 0)
+                            
+                            # Normalizza in percentuale
+                            center_x = ((x0 + x1) / 2.0) / page_width
+                            center_y = ((y0 + bottom) / 2.0) / page_height
+                            width = (x1 - x0) / page_width
+                            height = (bottom - y0) / page_height
+                            
+                            # Cerca il valore associato (di solito il prossimo testo a destra)
+                            # Per semplicità, usa la posizione del label come proxy
+                            signature.extend([center_x, center_y, width, height])
+                            field_found = True
+                            break
+                    
+                    if field_found:
+                        break
+                
+                if not field_found:
+                    # Campo non trovato: usa zeri
+                    signature.extend([0.0, 0.0, 0.0, 0.0])
+        
+        # Verifica che la signature sia completa (deve avere 20 valori: 5 campi * 4 coordinate)
+        if len(signature) != 20:
+            logger.warning(f"⚠️ Signature incompleta: {len(signature)} valori invece di 20")
+            return None
+        
+        return signature
+        
+    except ImportError:
+        logger.debug("pdfplumber non disponibile per estrazione signature")
+        return None
+    except Exception as e:
+        logger.debug(f"Errore estrazione signature PDF: {e}")
+        return None
+
+
+def calculate_geometry_similarity(signature1: List[float], signature2: List[float]) -> float:
+    """
+    Calcola la similarità geometrica tra due layout signature
+    
+    Usa distanza euclidea normalizzata e la converte in score di similarità (0.0-1.0).
+    
+    Args:
+        signature1: Prima signature (da template)
+        signature2: Seconda signature (da PDF)
+        
+    Returns:
+        Score di similarità tra 0.0 e 1.0 (1.0 = identico, 0.0 = completamente diverso)
+    """
+    if len(signature1) != len(signature2):
+        return 0.0
+    
+    if len(signature1) == 0:
+        return 0.0
+    
+    # Calcola distanza euclidea normalizzata
+    import math
+    squared_diff = sum((a - b) ** 2 for a, b in zip(signature1, signature2))
+    euclidean_distance = math.sqrt(squared_diff)
+    
+    # Normalizza la distanza (max possibile è sqrt(len(signature) * max_diff^2))
+    # Assumendo che i valori siano tra 0.0 e 1.0, max_diff = 1.0
+    max_possible_distance = math.sqrt(len(signature1) * 1.0)
+    
+    if max_possible_distance == 0:
+        return 1.0
+    
+    normalized_distance = euclidean_distance / max_possible_distance
+    
+    # Converti distanza in similarità (1.0 - distanza normalizzata)
+    similarity = 1.0 - normalized_distance
+    
+    # Assicura che sia tra 0.0 e 1.0
+    return max(0.0, min(1.0, similarity))
+
+
+def detect_layout_model_by_geometry(
+    file_path: str,
+    page_count: Optional[int] = None,
+    similarity_threshold: float = LAYOUT_GEOMETRY_SIMILARITY_THRESHOLD
+) -> Optional[tuple[str, LayoutRule]]:
+    """
+    Detect layout model usando SOLO similarità geometrica (box positions)
+    
+    Strategia PRIORITARIA: ignora completamente il testo, confronta solo le posizioni delle box.
+    Questo risolve il caso di PDF con stesso layout ma dati diversi.
+    
+    Args:
+        file_path: Percorso del file PDF
+        page_count: Numero di pagine del documento
+        similarity_threshold: Soglia minima di similarità geometrica (default: 0.85)
+        
+    Returns:
+        Tupla (rule_name, LayoutRule) se trovata, None altrimenti
+    """
+    rules = load_layout_rules()
+    
+    if not rules:
+        logger.debug("⚠️ Nessuna regola di layout disponibile per matching geometrico")
+        return None
+    
+    # Estrai signature dal PDF
+    pdf_signature = extract_pdf_layout_signature(file_path, page_count)
+    
+    if not pdf_signature:
+        logger.debug("⚠️ Impossibile estrarre signature geometrica dal PDF")
+        return None
+    
+    logger.debug(f"🔍 Layout matching geometrico: analizzando {len(rules)} template(s)")
+    
+    candidate_rules = []
+    
+    for rule_name, rule in rules.items():
+        # Calcola signature del template
+        template_signature = calculate_layout_signature(rule)
+        
+        # Calcola similarità geometrica
+        geometry_similarity = calculate_geometry_similarity(template_signature, pdf_signature)
+        
+        # Verifica page_count se specificato
+        page_count_match = True
+        if rule.match.page_count is not None:
+            if page_count != rule.match.page_count:
+                page_count_match = False
+                logger.debug(f"  ⚠️ Regola {rule_name}: page_count mismatch ({rule.match.page_count} vs {page_count})")
+        
+        # Se similarity supera la soglia, aggiungi ai candidati
+        if geometry_similarity >= similarity_threshold:
+            # Penalizza leggermente se page_count non matcha (ma non escludere completamente)
+            final_similarity = geometry_similarity
+            if not page_count_match:
+                final_similarity *= 0.95  # Penalità del 5%
+            
+            logger.debug(f"  📐 Template candidato: '{rule_name}'")
+            logger.debug(f"     Similarity geometrica: {geometry_similarity:.3f} {'✅' if final_similarity >= similarity_threshold else '❌'}")
+            if not page_count_match:
+                logger.debug(f"     ⚠️ Page count mismatch (penalità applicata)")
+            
+            if final_similarity >= similarity_threshold:
+                candidate_rules.append((rule_name, rule, final_similarity))
+    
+    if candidate_rules:
+        # Seleziona il template con similarity più alta
+        candidate_rules.sort(key=lambda x: x[2], reverse=True)
+        rule_name, rule, best_similarity = candidate_rules[0]
+        
+        logger.info(f"✅ LAYOUT MODEL MATCHED (GEOMETRY): '{rule_name}'")
+        logger.info(f"   Similarity geometrica: {best_similarity:.3f} (threshold: {similarity_threshold:.2f})")
+        logger.info(f"   Supplier modello: '{rule.match.supplier}'")
+        logger.info(f"   Fields disponibili: {list(rule.fields.keys())}")
+        
+        # Log altri candidati se presenti
+        if len(candidate_rules) > 1:
+            logger.info(f"   Altri candidati geometrici:")
+            for other_name, _, other_sim in candidate_rules[1:3]:  # Top 3
+                logger.info(f"     - {other_name}: similarity {other_sim:.3f}")
+        
+        return (rule_name, rule)
+    else:
+        logger.debug(f"ℹ️ LAYOUT MODEL SKIPPED (GEOMETRY): nessun match con similarity >= {similarity_threshold:.2f}")
+        return None
+
+
 def detect_layout_model_advanced(
     pdf_text: str,
     file_path: str,
@@ -380,22 +647,37 @@ def detect_layout_model_advanced(
     similarity_threshold: float = LAYOUT_MODEL_SIMILARITY_THRESHOLD
 ) -> Optional[tuple[str, LayoutRule]]:
     """
-    Pre-detection avanzata del layout model usando FUZZY MATCHING
+    Pre-detection avanzata del layout model usando STRATEGIE COMBINATE
     
     Strategie combinate (in ordine di priorità):
-    1. Keyword matching nel testo (prime righe) + fuzzy matching
-    2. Nome file matching + fuzzy matching
-    3. Mittente estratto dal testo + fuzzy matching
+    1. Layout similarity (box geometry) - PRIORITARIA, ignora testo completamente
+    2. Keyword matching nel testo (prime righe) + fuzzy matching
+    3. Nome file matching + fuzzy matching
+    4. Mittente estratto dal testo + fuzzy matching
+    
+    La strategia geometrica risolve il caso di PDF con stesso layout ma dati diversi.
     
     Args:
-        pdf_text: Testo estratto dal PDF
+        pdf_text: Testo estratto dal PDF (usato solo per fallback se geometry fallisce)
         file_path: Percorso del file PDF
         page_count: Numero di pagine del documento
-        similarity_threshold: Soglia minima di similarità (default: 0.6)
+        similarity_threshold: Soglia minima di similarità per fallback testuale (default: 0.6)
         
     Returns:
         Tupla (rule_name, LayoutRule) se trovata, None altrimenti
     """
+    # STRATEGIA 1: Layout similarity (GEOMETRY) - PRIORITARIA
+    # Ignora completamente il testo, confronta solo le posizioni delle box
+    logger.debug(f"🔍 Strategia 1: Layout matching geometrico (PRIORITARIA)")
+    geometry_match = detect_layout_model_by_geometry(file_path, page_count)
+    
+    if geometry_match:
+        rule_name, rule = geometry_match
+        logger.info(f"✅ LAYOUT MODEL MATCHED via GEOMETRY: '{rule_name}' (skip fallback testuale)")
+        return geometry_match
+    
+    # STRATEGIA 2: Fallback a matching testuale (solo se geometry fallisce)
+    logger.debug(f"🔍 Strategia 2: Layout matching testuale (fallback)")
     rules = load_layout_rules()
     
     if not rules:

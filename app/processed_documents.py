@@ -660,8 +660,65 @@ def get_document_metadata(doc_hash: str) -> Optional[Dict[str, Any]]:
             metadata["file_path"] = doc["file_path"]
         if "file_name" in doc:
             metadata["file_name"] = doc["file_name"]
+        if "needs_recalculation" in doc:
+            metadata["needs_recalculation"] = doc["needs_recalculation"]
+        if "template_id_applied" in doc:
+            metadata["template_id_applied"] = doc["template_id_applied"]
         
         return metadata if metadata else None
+
+
+def mark_document_needs_recalculation(doc_hash: str, template_id: Optional[str] = None) -> None:
+    """
+    Marca un documento come necessitante ricalcolo dei dati estratti
+    
+    Usato quando viene applicato un template manualmente e i dati precedenti non sono più validi.
+    
+    Args:
+        doc_hash: Hash SHA256 del documento
+        template_id: ID del template applicato (opzionale)
+    """
+    with _documents_lock:
+        data = _load_documents()
+        documents = data.setdefault("documents", {})
+        
+        if doc_hash not in documents:
+            logger.warning(f"⚠️ Tentativo di marcare ricalcolo per documento non trovato: hash={doc_hash[:16]}...")
+            return
+        
+        doc = documents[doc_hash]
+        doc["needs_recalculation"] = True
+        doc["last_updated"] = datetime.now().isoformat()
+        
+        if template_id:
+            doc["template_id_applied"] = template_id
+        
+        _save_documents(data)
+        logger.info(f"🔄 Documento marcato per ricalcolo: hash={doc_hash[:16]}... template_id={template_id or 'N/A'}")
+
+
+def clear_document_recalculation_flag(doc_hash: str) -> None:
+    """
+    Rimuove il flag needs_recalculation da un documento
+    
+    Usato dopo che l'estrazione è stata rieseguita con successo.
+    
+    Args:
+        doc_hash: Hash SHA256 del documento
+    """
+    with _documents_lock:
+        data = _load_documents()
+        documents = data.setdefault("documents", {})
+        
+        if doc_hash not in documents:
+            return
+        
+        doc = documents[doc_hash]
+        doc.pop("needs_recalculation", None)
+        doc["last_updated"] = datetime.now().isoformat()
+        
+        _save_documents(data)
+        logger.debug(f"✅ Flag ricalcolo rimosso: hash={doc_hash[:16]}...")
 
 
 def should_process_document(doc_hash: str) -> tuple[bool, str]:

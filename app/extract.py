@@ -390,12 +390,14 @@ Cerca i dati nelle aree indicate, ma verifica sempre che i dati estratti siano c
     
     return prompt
 
-def extract_from_pdf(file_path: str) -> Dict[str, Any]:
+def extract_from_pdf(file_path: str, template_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Estrae dati strutturati da un PDF DDT usando OpenAI Vision
     
     Args:
         file_path: Percorso del file PDF
+        template_id: ID del template da applicare forzatamente (opzionale).
+                    Se specificato, salta il matching automatico e usa direttamente questo template.
         
     Returns:
         Dizionario con i dati estratti e validati
@@ -443,32 +445,51 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
         layout_rules_loaded = load_layout_rules()
         
         # FASE 1: PRE-DETECTION AVANZATA DEL LAYOUT MODEL
-        # Usa multiple strategie (keyword, nome file, testo) PRIMA dell'estrazione AI
+        # Se template_id è specificato, FORZA l'applicazione di quel template (skip matching automatico)
         layout_rule = None
         layout_rule_name = None
         extraction_mode = None
         box_extracted_data = None  # Inizializza sempre per evitare errori
         
-        logger.debug(f"🔍 Fase pre-detection layout model...")
-        detection_result = detect_layout_model_advanced(pdf_text, file_path, page_count)
-        
-        if detection_result:
-            layout_rule_name, layout_rule = detection_result
-            logger.info(f"📐 LAYOUT MODEL MATCHED: '{layout_rule_name}'")
+        if template_id:
+            # TEMPLATE FORZATO: applica direttamente il template specificato dall'operatore
+            logger.info(f"🎯 TEMPLATE FORZATO dall'operatore: '{template_id}' - Skip matching automatico")
+            if template_id not in layout_rules_loaded:
+                error_msg = f"Template '{template_id}' non trovato nei layout rules disponibili"
+                logger.error(f"❌ {error_msg}")
+                raise ValueError(error_msg)
+            
+            layout_rule = layout_rules_loaded[template_id]
+            layout_rule_name = template_id
+            extraction_mode = "LAYOUT_MODEL_FORCED"
+            logger.info(f"📐 TEMPLATE FORZATO APPLICATO: '{layout_rule_name}'")
             logger.info(f"   Supplier modello: '{layout_rule.match.supplier}'")
             logger.info(f"   Fields disponibili: {list(layout_rule.fields.keys())}")
             logger.info(f"   Page count modello: {layout_rule.match.page_count or 'Tutte'}")
             logger.info(f"   Page count documento: {page_count}")
-            extraction_mode = "LAYOUT_MODEL"
         else:
-            logger.info(f"❌ LAYOUT MODEL SKIPPED: nessun match trovato nella pre-detection")
-            logger.info(f"   Motivo: nessun layout model ha superato la soglia di similarity")
-            extraction_mode = "AI_FALLBACK"
+            # MATCHING AUTOMATICO: usa multiple strategie (keyword, nome file, testo) PRIMA dell'estrazione AI
+            logger.debug(f"🔍 Fase pre-detection layout model (matching automatico)...")
+            detection_result = detect_layout_model_advanced(pdf_text, file_path, page_count)
+            
+            if detection_result:
+                layout_rule_name, layout_rule = detection_result
+                logger.info(f"📐 LAYOUT MODEL MATCHED: '{layout_rule_name}'")
+                logger.info(f"   Supplier modello: '{layout_rule.match.supplier}'")
+                logger.info(f"   Fields disponibili: {list(layout_rule.fields.keys())}")
+                logger.info(f"   Page count modello: {layout_rule.match.page_count or 'Tutte'}")
+                logger.info(f"   Page count documento: {page_count}")
+                extraction_mode = "LAYOUT_MODEL"
+            else:
+                logger.info(f"❌ LAYOUT MODEL SKIPPED: nessun match trovato nella pre-detection")
+                logger.info(f"   Motivo: nessun layout model ha superato la soglia di similarity")
+                extraction_mode = "AI_FALLBACK"
         
-        # HARD FAILOVER: Se layout model matcha, USA SOLO BOX EXTRACTION, NON chiamare LLM
+        # HARD FAILOVER: Se layout model matcha o è forzato, USA SOLO BOX EXTRACTION, NON chiamare LLM
         if layout_rule:
             supplier_name = layout_rule.match.supplier
-            logger.info(f"📐 LAYOUT MODEL APPLIED: '{layout_rule_name}' - Using LAYOUT_MODEL extraction mode (NO LLM)")
+            mode_label = "FORCED" if extraction_mode == "LAYOUT_MODEL_FORCED" else "MATCHED"
+            logger.info(f"📐 LAYOUT MODEL APPLIED ({mode_label}): '{layout_rule_name}' - Using LAYOUT_MODEL extraction mode (NO LLM)")
             logger.info(f"   Supplier: '{supplier_name}'")
             logger.info(f"   Fields disponibili nel modello: {list(layout_rule.fields.keys())}")
             
@@ -583,10 +604,12 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
                             ddt_data = DDTData(**hybrid_data)
                             result = ddt_data.model_dump()
                             
-                            extraction_mode = "HYBRID_LAYOUT_AI"
+                            # Se template era forzato, mantieni LAYOUT_MODEL_FORCED, altrimenti HYBRID_LAYOUT_AI
+                            if extraction_mode != "LAYOUT_MODEL_FORCED":
+                                extraction_mode = "HYBRID_LAYOUT_AI"
                             # Aggiungi extraction_mode al risultato per audit trail
                             result["_extraction_mode"] = extraction_mode
-                            logger.info(f"✅ Documento completato con strategia HYBRID_LAYOUT_AI")
+                            logger.info(f"✅ Documento completato con strategia {extraction_mode}")
                             logger.info(f"📊 Extraction mode used: {extraction_mode}")
                             logger.info(f"📐 Layout model '{layout_rule_name}': {extracted_count} campi + AI: {len(ai_missing_data)} campi")
                             return result
@@ -622,11 +645,11 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
                 raise ValueError(error_msg) from e
         
         # FIX #1: GUARD CLAUSE - Invariante extraction_mode
-        # Se layout_rule era matchato ma arriviamo qui, significa che box extraction è fallita
+        # Se layout_rule era matchato/forzato ma arriviamo qui, significa che box extraction è fallita
         # NON procedere con AI extraction - solleva errore esplicito
         # NOTA: Questa guard clause non dovrebbe mai essere raggiunta dopo i fix sopra,
         # ma la manteniamo come safety check finale
-        if layout_rule and extraction_mode == "LAYOUT_MODEL":
+        if layout_rule and extraction_mode in ("LAYOUT_MODEL", "LAYOUT_MODEL_FORCED"):
             logger.error(f"❌ CRITICAL: Layout model '{layout_rule_name}' matchato ma estrazione fallita")
             logger.error(f"   Questo non dovrebbe mai accadere - tutti i casi dovrebbero essere gestiti sopra")
             
@@ -838,10 +861,10 @@ def extract_from_pdf(file_path: str) -> Dict[str, Any]:
         # Normalizza i dati prima della validazione
         normalized_data = _normalize_extracted_data(raw_data)
         
-        # HARD FAILOVER: Se extraction_mode è LAYOUT_MODEL o HYBRID_LAYOUT_AI, NON dovremmo essere qui
+        # HARD FAILOVER: Se extraction_mode è LAYOUT_MODEL/LAYOUT_MODEL_FORCED o HYBRID_LAYOUT_AI, NON dovremmo essere qui
         # Se siamo qui, significa che extraction_mode è AI_FALLBACK
         # (Questo check non dovrebbe mai essere raggiunto dopo le modifiche, ma lo manteniamo come safety check)
-        if extraction_mode in ("LAYOUT_MODEL", "HYBRID_LAYOUT_AI"):
+        if extraction_mode in ("LAYOUT_MODEL", "LAYOUT_MODEL_FORCED", "HYBRID_LAYOUT_AI"):
             layout_rule_name_safe = layout_rule_name if 'layout_rule_name' in locals() else 'UNKNOWN'
             error_msg = (
                 f"❌ CRITICAL BUG: extraction_mode è {extraction_mode} ma siamo nella sezione AI extraction! "

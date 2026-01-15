@@ -561,7 +561,15 @@ async def apply_model(
         if not file_path or not Path(file_path).exists():
             raise HTTPException(status_code=404, detail="File PDF non trovato")
         
-        # Carica il modello
+        # Verifica che il documento non sia già finalizzato
+        from app.processed_documents import get_document_status, DocumentStatus, is_document_finalized
+        if is_document_finalized(file_hash):
+            raise HTTPException(
+                status_code=400, 
+                detail="Impossibile applicare template: documento già finalizzato"
+            )
+        
+        # Carica il modello e verifica che esista
         all_rules = load_layout_rules()
         if model_id not in all_rules:
             raise HTTPException(status_code=404, detail=f"Modello '{model_id}' non trovato")
@@ -569,10 +577,29 @@ async def apply_model(
         layout_rule = all_rules[model_id]
         supplier = layout_rule.match.supplier
         
-        # Riprocessa il documento con il modello specifico
-        # Per ora, estrai normalmente (il sistema applicherà automaticamente il modello se matcha)
-        # In futuro potremmo forzare l'applicazione del modello
-        extracted_data = extract_from_pdf(file_path)
+        # FIX FASE 2: Marca documento per ricalcolo (i dati precedenti non sono più validi)
+        from app.processed_documents import mark_document_needs_recalculation, clear_document_recalculation_flag
+        mark_document_needs_recalculation(file_hash, template_id=model_id)
+        logger.info(f"🔄 Documento marcato per ricalcolo: template '{model_id}' applicato manualmente")
+        
+        # FIX FASE 2: FORZA l'applicazione del template selezionato dall'operatore
+        # Passa template_id a extract_from_pdf() per bypassare il matching automatico
+        logger.info(f"🎯 Applicazione template forzato dall'operatore: '{model_id}' per mittente '{supplier}'")
+        extracted_data = extract_from_pdf(file_path, template_id=model_id)
+        
+        # Estrai extraction_mode dal risultato
+        extraction_mode = extracted_data.pop("_extraction_mode", None)
+        
+        # FIX FASE 2: Aggiorna la coda watchdog con i nuovi dati estratti
+        from app.watchdog_queue import update_queue_item_by_hash
+        queue_updated = update_queue_item_by_hash(file_hash, extracted_data, extraction_mode)
+        if queue_updated:
+            logger.info(f"✅ Coda watchdog aggiornata con nuovi dati estratti: file_hash={file_hash[:16]}...")
+        else:
+            logger.warning(f"⚠️ Elemento non trovato nella coda watchdog: file_hash={file_hash[:16]}... (potrebbe essere già processato)")
+        
+        # Rimuovi flag ricalcolo dopo successo
+        clear_document_recalculation_flag(file_hash)
         
         logger.info(f"✅ Documento riprocessato con modello '{model_id}' per mittente '{supplier}'")
         
@@ -583,7 +610,8 @@ async def apply_model(
             "model_applied": {
                 "id": model_id,
                 "name": supplier
-            }
+            },
+            "extraction_mode": extraction_mode
         })
     except HTTPException:
         raise

@@ -257,6 +257,58 @@ def get_item_by_id(queue_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def update_queue_item_by_hash(
+    file_hash: str,
+    extracted_data: Dict[str, Any],
+    extraction_mode: Optional[str] = None
+) -> bool:
+    """
+    Aggiorna i dati estratti di un elemento nella coda watchdog
+    
+    Usato quando viene applicato un template manualmente e i dati devono essere ricalcolati.
+    
+    Args:
+        file_hash: Hash del file PDF
+        extracted_data: Nuovi dati estratti
+        extraction_mode: Nuova modalità di estrazione (opzionale)
+        
+    Returns:
+        True se aggiornato, False se elemento non trovato
+    """
+    global _watchdog_queue
+    
+    with _queue_lock:
+        _load_queue()
+        
+        # Trova l'elemento per file_hash (non processato)
+        updated = False
+        for item in _watchdog_queue:
+            if item.get("file_hash") == file_hash and not item.get("processed", False):
+                # Aggiorna i dati estratti
+                item["extracted_data"] = extracted_data
+                
+                # Aggiorna extraction_mode se fornito
+                if extraction_mode:
+                    item["extraction_mode"] = extraction_mode
+                    # Ricalcola i flag basati sul nuovo extraction_mode
+                    item["suggest_create_layout"] = (extraction_mode == "AI_FALLBACK")
+                    item["has_layout_model"] = (extraction_mode in ("LAYOUT_MODEL", "LAYOUT_MODEL_FORCED", "HYBRID_LAYOUT_AI"))
+                
+                # Aggiorna timestamp per indicare che è stato ricalcolato
+                item["last_recalculated"] = datetime.now().isoformat()
+                
+                updated = True
+                logger.info(f"✅ Coda watchdog aggiornata: file_hash={file_hash[:16]}... extraction_mode={extraction_mode or 'N/A'}")
+                break
+        
+        if updated:
+            _save_queue()
+        else:
+            logger.warning(f"⚠️ Elemento non trovato nella coda watchdog per file_hash={file_hash[:16]}...")
+        
+        return updated
+
+
 def cleanup_old_items() -> int:
     """
     Rimuove elementi vecchi dalla coda per evitare crescita indefinita
