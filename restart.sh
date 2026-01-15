@@ -1,37 +1,23 @@
 #!/bin/bash
-
-echo "=============================="
-echo "🔄 Restart completo DDT"
-echo "=============================="
-
 set -e
 
-echo "🛑 Stop servizi..."
-sudo systemctl stop ddt-web || true
-sudo systemctl stop ddt-reader.service || true
-sudo systemctl stop ddt-worker || true
+echo "🛑 Stop servizi"
+sudo systemctl stop ddt-web
+sudo systemctl stop ddt-worker
 
-echo "🧹 Kill processi residui (python/uvicorn)..."
-sudo pkill -9 -f uvicorn || true
-sudo pkill -9 -f ddt || true
+echo "🧹 Pulizia pycache"
+sudo find /var/www/DDT -type d -name "__pycache__" -exec rm -rf {} +
 
-echo "🔄 Reload systemd..."
-sudo systemctl daemon-reexec
-sudo systemctl daemon-reload
-
-echo "🚀 Avvio worker..."
+echo "🚀 Start worker"
 sudo systemctl start ddt-worker
-sleep 3
+sleep 2
 
-echo "🚀 Avvio web..."
+echo "🌐 Start web"
 sudo systemctl start ddt-web
-sleep 3
+sleep 2
 
-echo "🧪 Verifica stato servizi..."
+echo "📊 Stato servizi"
 sudo systemctl status ddt-worker --no-pager
 sudo systemctl status ddt-web --no-pager
 
-echo "🌐 Verifica porta 8080..."
-sudo ss -ltnp | grep :8080 || echo "⚠️ Porta 8080 non ancora attiva"
-
-echo "✅ Restart DDT completato"
+echo "✅ Restart completato"

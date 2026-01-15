@@ -249,9 +249,9 @@ def load_layout_rules(force_reload: bool = False) -> Dict[str, LayoutRule]:
         
         return rules
     except json.JSONDecodeError as e:
-        logger.error(f"❌ [FAIL-FAST] Errore parsing JSON layout rules da {LAYOUT_RULES_FILE}: {e}")
-        logger.error(f"❌ [FAIL-FAST] File potrebbe essere corrotto o malformato - ritorno {} immediatamente")
-        logger.info(f"✅ [FAIL-FAST] Loaded 0 layout rules: []")
+        logger.error("❌ [FAIL-FAST] Errore parsing JSON layout rules da %s: %s", str(LAYOUT_RULES_FILE), str(e))
+        logger.error("❌ [FAIL-FAST] File potrebbe essere corrotto o malformato - ritorno dict vuoto immediatamente")
+        logger.info("✅ [FAIL-FAST] Loaded 0 layout rules: []")
         # Aggiorna cache vuota
         _layout_rules_cache = {}
         _layout_rules_cache_timestamp = None
