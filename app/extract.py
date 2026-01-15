@@ -451,7 +451,7 @@ def extract_from_pdf(file_path: str, template_id: Optional[str] = None) -> Dict[
         extraction_mode = None
         box_extracted_data = None  # Inizializza sempre per evitare errori
         
-        if template_id:
+        if template_id and template_id.strip():
             # TEMPLATE FORZATO: applica direttamente il template specificato dall'operatore
             logger.info(f"🎯 TEMPLATE FORZATO dall'operatore: '{template_id}' - Skip matching automatico")
             if template_id not in layout_rules_loaded:

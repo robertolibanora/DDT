@@ -577,30 +577,88 @@ async def apply_model(
         layout_rule = all_rules[model_id]
         supplier = layout_rule.match.supplier
         
+        # REGOLA DI FERRO: Il flag needs_recalculation viene rimosso SOLO se:
+        # 1. L'estrazione con template forzato è andata a buon fine
+        # 2. E la watchdog queue è stata aggiornata con successo
+        # In QUALSIASI altro caso, il flag deve RESTARE true
+        
+        # Variabile di controllo esplicita per tracciare il successo completo
+        recalculation_success = False
+        
         # FIX FASE 2: Marca documento per ricalcolo (i dati precedenti non sono più validi)
         from app.processed_documents import mark_document_needs_recalculation, clear_document_recalculation_flag
+        from app.watchdog_queue import update_queue_item_by_hash
+        
         mark_document_needs_recalculation(file_hash, template_id=model_id)
         logger.info(f"🔄 Documento marcato per ricalcolo: template '{model_id}' applicato manualmente")
         
-        # FIX FASE 2: FORZA l'applicazione del template selezionato dall'operatore
-        # Passa template_id a extract_from_pdf() per bypassare il matching automatico
-        logger.info(f"🎯 Applicazione template forzato dall'operatore: '{model_id}' per mittente '{supplier}'")
-        extracted_data = extract_from_pdf(file_path, template_id=model_id)
-        
-        # Estrai extraction_mode dal risultato
-        extraction_mode = extracted_data.pop("_extraction_mode", None)
-        
-        # FIX FASE 2: Aggiorna la coda watchdog con i nuovi dati estratti
-        from app.watchdog_queue import update_queue_item_by_hash
-        queue_updated = update_queue_item_by_hash(file_hash, extracted_data, extraction_mode)
-        if queue_updated:
+        try:
+            # FASE 1: Estrazione con template forzato
+            # FIX FASE 2: FORZA l'applicazione del template selezionato dall'operatore
+            # Passa template_id a extract_from_pdf() per bypassare il matching automatico
+            logger.info(f"🎯 Applicazione template forzato dall'operatore: '{model_id}' per mittente '{supplier}'")
+            extracted_data = extract_from_pdf(file_path, template_id=model_id)
+            
+            # Estrai extraction_mode dal risultato
+            extraction_mode = extracted_data.pop("_extraction_mode", None)
+            logger.info(f"✅ Estrazione completata con successo: extraction_mode={extraction_mode}")
+            
+            # FASE 2: Aggiornamento watchdog queue
+            # FIX FASE 2: Aggiorna la coda watchdog con i nuovi dati estratti
+            queue_updated = update_queue_item_by_hash(file_hash, extracted_data, extraction_mode)
+            
+            if not queue_updated:
+                # CRITICO: La coda non è stata aggiornata - i dati vecchi sono ancora visibili
+                error_msg = (
+                    f"Impossibile aggiornare i dati nella coda watchdog per file_hash={file_hash[:16]}... "
+                    f"I dati precedenti potrebbero essere ancora visibili. "
+                    f"Il flag needs_recalculation è stato mantenuto per indicare che i dati sono invalidi."
+                )
+                logger.error(f"❌ {error_msg}")
+                # NON impostare recalculation_success = True
+                # Il flag needs_recalculation rimarrà true
+                raise HTTPException(
+                    status_code=500,
+                    detail=error_msg
+                )
+            
+            # Entrambe le operazioni hanno avuto successo
             logger.info(f"✅ Coda watchdog aggiornata con nuovi dati estratti: file_hash={file_hash[:16]}...")
-        else:
-            logger.warning(f"⚠️ Elemento non trovato nella coda watchdog: file_hash={file_hash[:16]}... (potrebbe essere già processato)")
+            recalculation_success = True
+            
+        except HTTPException:
+            # Rilancia HTTPException così com'è (già gestita con messaggio appropriato)
+            # Il flag needs_recalculation rimane true
+            raise
+        except ValueError as e:
+            # Errore durante estrazione (es. template non valido, OCR non disponibile, ecc.)
+            error_msg = f"Errore durante estrazione con template '{model_id}': {str(e)}"
+            logger.error(f"❌ {error_msg}")
+            # Il flag needs_recalculation rimane true
+            raise HTTPException(status_code=422, detail=error_msg)
+        except Exception as e:
+            # Errore generico
+            error_msg = f"Errore durante applicazione template '{model_id}': {str(e)}"
+            logger.error(f"❌ {error_msg}", exc_info=True)
+            # Il flag needs_recalculation rimane true
+            raise HTTPException(status_code=500, detail=error_msg)
         
-        # Rimuovi flag ricalcolo dopo successo
+        # REGOLA DI FERRO: Rimuovi flag SOLO se recalculation_success == True
+        if not recalculation_success:
+            # Questo caso non dovrebbe mai essere raggiunto (tutte le eccezioni sono gestite sopra)
+            # Ma lo manteniamo come safety check finale
+            logger.error(
+                f"❌ CRITICAL: recalculation_success=False ma nessuna eccezione sollevata. "
+                f"Il flag needs_recalculation è stato mantenuto per sicurezza."
+            )
+            raise HTTPException(
+                status_code=500,
+                detail="Errore interno: impossibile completare il ricalcolo. Il flag needs_recalculation è stato mantenuto."
+            )
+        
+        # Entrambe le operazioni hanno avuto successo - rimuovi flag e restituisci risultato
         clear_document_recalculation_flag(file_hash)
-        
+        logger.info(f"✅ Flag ricalcolo rimosso: file_hash={file_hash[:16]}... (estrazione + aggiornamento coda completati)")
         logger.info(f"✅ Documento riprocessato con modello '{model_id}' per mittente '{supplier}'")
         
         return JSONResponse({
