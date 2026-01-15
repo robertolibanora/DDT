@@ -73,3 +73,9 @@ def get_local_ip():
 
 # Usa l'IP dalla variabile d'ambiente se presente, altrimenti calcolalo automaticamente
 SERVER_IP = os.getenv("SERVER_IP") or get_local_ip()
+
+# Ruolo del processo: "web" (solo FastAPI) o "worker" (watchdog + processing)
+# Default: "web" per backward compatibility
+DDT_ROLE = os.getenv("DDT_ROLE", "web").lower()
+IS_WEB_ROLE = DDT_ROLE == "web"
+IS_WORKER_ROLE = DDT_ROLE == "worker"

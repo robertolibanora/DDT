@@ -15,7 +15,7 @@ from watchdog.events import FileSystemEventHandler
 
 from app.extract import extract_from_pdf, generate_preview_png
 from app.excel import append_to_excel, read_excel_as_dict, clear_all_ddt
-from app.config import INBOX_DIR, SERVER_IP
+from app.config import INBOX_DIR, SERVER_IP, DDT_ROLE, IS_WEB_ROLE, IS_WORKER_ROLE
 from app.logging_config import setup_logging
 from app.routers import rules_router, reprocess_router, preview_router, layout_router, models_router
 from app.corrections import get_file_hash
@@ -389,38 +389,50 @@ def start_watcher_background(observer: Observer):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """
+    Lifespan FastAPI - gestisce startup e shutdown.
+    
+    IMPORTANTE: Se DDT_ROLE=web, NON avvia watchdog/processing/cleanup.
+    Questi vengono gestiti da worker.py separato.
+    """
+    # Determina ruolo processo
+    role_label = "[WEB]" if IS_WEB_ROLE else "[WORKER]"
+    logger.info(f"{role_label} Ruolo processo: {DDT_ROLE.upper()}")
+    
     # FIX CRITICO: Startup deve essere NON-BLOCCANTE (< 10ms)
     # Tutte le operazioni lunghe vengono spostate in thread daemon
     
     # Assicurati che la cartella inbox esista (usando sistema paths centralizzato)
     from app.paths import get_inbox_dir
     inbox_path = get_inbox_dir()
-    logger.info(f"📁 Cartella inbox verificata: {inbox_path}")
+    logger.info(f"{role_label} Cartella inbox verificata: {inbox_path}")
     
     # Sposta operazioni lunghe in thread daemon (NON bloccanti)
+    # SOLO per ruoli web: task leggeri (migrazione, layout models, cleanup coda)
     def init_background_tasks():
-        """Inizializza task in background (migrazione, layout models, controllo STUCK, cleanup coda)"""
-        logger.info("🚀 [BACKGROUND_TASKS] Avvio task iniziali in background...")
+        """Inizializza task in background (migrazione, layout models, cleanup coda)"""
+        role_label = "[WEB]" if IS_WEB_ROLE else "[WORKER]"
+        logger.info(f"{role_label} [BACKGROUND_TASKS] Avvio task iniziali in background...")
         
         try:
             # Migra documenti READY (deprecato) a READY_FOR_REVIEW per backward compatibility
-            logger.info("🔄 [BACKGROUND_TASKS] Avvio migrazione stati...")
+            logger.info(f"{role_label} [BACKGROUND_TASKS] Avvio migrazione stati...")
             from app.processed_documents import migrate_ready_to_ready_for_review
             migrated_count = migrate_ready_to_ready_for_review()
             if migrated_count > 0:
-                logger.info(f"✅ [BACKGROUND_TASKS] Migrazione stati completata: {migrated_count} documento(i) migrato(i)")
+                logger.info(f"{role_label} [BACKGROUND_TASKS] Migrazione stati completata: {migrated_count} documento(i) migrato(i)")
             else:
-                logger.info("✅ [BACKGROUND_TASKS] Migrazione stati: nessun documento da migrare")
+                logger.info(f"{role_label} [BACKGROUND_TASKS] Migrazione stati: nessun documento da migrare")
         except Exception as e:
-            logger.error(f"❌ [BACKGROUND_TASKS] Errore migrazione stati: {e}", exc_info=True)
+            logger.error(f"{role_label} [BACKGROUND_TASKS] Errore migrazione stati: {e}", exc_info=True)
         
         try:
             # Carica layout models all'avvio per loggare disponibilità
-            logger.info("📐 [BACKGROUND_TASKS] Avvio caricamento layout models...")
+            logger.info(f"{role_label} [BACKGROUND_TASKS] Avvio caricamento layout models...")
             from app.layout_rules.manager import load_layout_rules
             rules = load_layout_rules()
             if rules:
-                logger.info(f"✅ [BACKGROUND_TASKS] Layout models disponibili: {len(rules)} modello(i)")
+                logger.info(f"{role_label} [BACKGROUND_TASKS] Layout models disponibili: {len(rules)} modello(i)")
                 # Log per mittente
                 from app.layout_rules.manager import normalize_sender
                 sender_counts = {}
@@ -429,109 +441,105 @@ async def lifespan(app: FastAPI):
                     sender_norm = normalize_sender(supplier)
                     sender_counts[sender_norm] = sender_counts.get(sender_norm, 0) + 1
                 for sender_norm, count in sender_counts.items():
-                    logger.info(f"   📦 [BACKGROUND_TASKS] Loaded {count} layout model(s) for sender: {sender_norm}")
+                    logger.info(f"   📦 {role_label} [BACKGROUND_TASKS] Loaded {count} layout model(s) for sender: {sender_norm}")
             else:
-                logger.info("✅ [BACKGROUND_TASKS] Nessun layout model disponibile")
+                logger.info(f"{role_label} [BACKGROUND_TASKS] Nessun layout model disponibile")
         except Exception as e:
-            logger.error(f"❌ [BACKGROUND_TASKS] Errore caricamento layout models: {e}", exc_info=True)
-        
-        try:
-            # Esegui un controllo iniziale all'avvio (in background)
-            logger.info("🔍 [BACKGROUND_TASKS] Avvio controllo iniziale STUCK...")
-            from app.processed_documents import check_and_mark_stuck_documents
-            initial_stuck = check_and_mark_stuck_documents()
-            if initial_stuck > 0:
-                logger.info(f"✅ [BACKGROUND_TASKS] Controllo iniziale STUCK: {initial_stuck} documento(i) già bloccato(i)")
-            else:
-                logger.info("✅ [BACKGROUND_TASKS] Controllo iniziale STUCK: nessun documento bloccato")
-        except Exception as e:
-            logger.error(f"❌ [BACKGROUND_TASKS] Errore controllo iniziale STUCK: {e}", exc_info=True)
+            logger.error(f"{role_label} [BACKGROUND_TASKS] Errore caricamento layout models: {e}", exc_info=True)
         
         try:
             # Carica e pulisci coda watchdog (in background)
-            logger.info("📋 [BACKGROUND_TASKS] Avvio caricamento e pulizia coda watchdog...")
+            logger.info(f"{role_label} [BACKGROUND_TASKS] Avvio caricamento e pulizia coda watchdog...")
             from app.watchdog_queue import _load_queue, cleanup_old_items
             _load_queue()
             removed_count = cleanup_old_items()
             if removed_count > 0:
-                logger.info(f"✅ [BACKGROUND_TASKS] Pulizia coda watchdog: {removed_count} elemento(i) rimosso(i)")
+                logger.info(f"{role_label} [BACKGROUND_TASKS] Pulizia coda watchdog: {removed_count} elemento(i) rimosso(i)")
             else:
-                logger.info("✅ [BACKGROUND_TASKS] Pulizia coda watchdog: nessun elemento da rimuovere")
+                logger.info(f"{role_label} [BACKGROUND_TASKS] Pulizia coda watchdog: nessun elemento da rimuovere")
         except Exception as e:
-            logger.error(f"❌ [BACKGROUND_TASKS] Errore caricamento/pulizia coda watchdog: {e}", exc_info=True)
+            logger.error(f"{role_label} [BACKGROUND_TASKS] Errore caricamento/pulizia coda watchdog: {e}", exc_info=True)
         
-        logger.info("✅ [BACKGROUND_TASKS] Tutti i task iniziali completati")
+        logger.info(f"{role_label} [BACKGROUND_TASKS] Tutti i task iniziali completati")
     
     # Avvia task iniziali in thread daemon (NON bloccante)
+    # SOLO task leggeri (migrazione, layout models, cleanup coda) - NO watchdog/processing/cleanup STUCK
     init_thread = threading.Thread(target=init_background_tasks, daemon=True)
     init_thread.start()
-    logger.info("🚀 [LIFESPAN] Task iniziali avviati in background thread (migrazione, layout models, controllo STUCK, cleanup coda)")
+    logger.info(f"{role_label} [LIFESPAN] Task iniziali avviati in background thread (migrazione, layout models, cleanup coda)")
     
-    # Startup - avvia il watchdog in background
-    # IMPORTANTE: observer.start() è NON-BLOCCANTE, ma lo eseguiamo comunque in thread daemon per sicurezza
-    logger.info("👀 [LIFESPAN] Configurazione watchdog filesystem...")
-    global _global_observer
-    observer = Observer()
-    _global_observer = observer  # Salva riferimento globale per shutdown handler
-    
-    try:
-        handler = DDTHandler()  # Crea un'istanza singola dell'handler per mantenere lo stato
-        observer.schedule(handler, inbox_path, recursive=False)
+    # IMPORTANTE: Se DDT_ROLE=web, NON avviare watchdog/processing/cleanup STUCK
+    # Questi vengono gestiti da worker.py separato
+    if IS_WORKER_ROLE:
+        # Startup - avvia il watchdog in background (SOLO per worker)
+        logger.info(f"{role_label} [LIFESPAN] Configurazione watchdog filesystem (worker mode)...")
+        global _global_observer
+        observer = Observer()
+        _global_observer = observer  # Salva riferimento globale per shutdown handler
+        
+        try:
+            handler = DDTHandler()  # Crea un'istanza singola dell'handler per mantenere lo stato
+            observer.schedule(handler, inbox_path, recursive=False)
+            # REGOLA FERREA: daemon=True per permettere shutdown veloce
+            watcher_thread = threading.Thread(target=start_watcher_background, args=(observer,), daemon=True)
+            watcher_thread.start()
+            logger.info(f"{role_label} [LIFESPAN] Watchdog configurato per monitorare: {inbox_path}")
+        except Exception as e:
+            logger.error(f"{role_label} [LIFESPAN] Errore nella configurazione del watchdog: {e}", exc_info=True)
+            _global_observer = None
+        
+        # Startup - avvia cleanup periodico per documenti STUCK (SOLO per worker)
+        global _cleanup_thread, _cleanup_shutdown_flag
+        _cleanup_shutdown_flag.clear()  # Reset flag all'avvio
+        
+        def stuck_cleanup_loop():
+            """
+            Loop periodico per controllare e marcare documenti PROCESSING bloccati come STUCK.
+            
+            IMPORTANTE: Eseguito in thread daemon separato, NON blocca mai il main thread.
+            Usa Event.wait() invece di time.sleep() per permettere interruzione immediata.
+            """
+            import time
+            from app.processed_documents import check_and_mark_stuck_documents
+            # Esegui cleanup ogni 5 minuti
+            cleanup_interval = 300  # 5 minuti
+            logger.info(f"{role_label} [CLEANUP_LOOP] Cleanup loop STUCK avviato (thread daemon)")
+            
+            while not _cleanup_shutdown_flag.is_set():
+                try:
+                    # Usa wait invece di sleep per permettere interruzione immediata (NON-BLOCCANTE)
+                    if _cleanup_shutdown_flag.wait(timeout=cleanup_interval):
+                        # Flag di shutdown impostato, esci dal loop
+                        logger.info(f"{role_label} [CLEANUP_LOOP] Shutdown richiesto, terminazione...")
+                        break
+                    
+                    # Esegui cleanup solo se shutdown non richiesto
+                    if not _cleanup_shutdown_flag.is_set():
+                        logger.debug(f"{role_label} [CLEANUP_LOOP] Esecuzione controllo STUCK...")
+                        stuck_count = check_and_mark_stuck_documents()
+                        if stuck_count > 0:
+                            logger.info(f"{role_label} [CLEANUP_LOOP] Cleanup STUCK: {stuck_count} documento(i) marcato(i) come STUCK")
+                        else:
+                            logger.debug(f"{role_label} [CLEANUP_LOOP] Nessun documento STUCK trovato")
+                except Exception as e:
+                    logger.error(f"{role_label} [CLEANUP_LOOP] Errore nel cleanup STUCK: {e}", exc_info=True)
+            
+            logger.info(f"{role_label} [CLEANUP_LOOP] Cleanup loop STUCK terminato")
+        
         # REGOLA FERREA: daemon=True per permettere shutdown veloce
-        watcher_thread = threading.Thread(target=start_watcher_background, args=(observer,), daemon=True)
-        watcher_thread.start()
-        logger.info(f"✅ [LIFESPAN] Watchdog configurato per monitorare: {inbox_path}")
-    except Exception as e:
-        logger.error(f"❌ [LIFESPAN] Errore nella configurazione del watchdog: {e}", exc_info=True)
+        # IMPORTANTE: Loop cleanup in thread daemon separato, NON blocca mai il main thread
+        logger.info(f"{role_label} [LIFESPAN] Avvio cleanup thread STUCK...")
+        _cleanup_thread = threading.Thread(target=stuck_cleanup_loop, daemon=True)
+        _cleanup_thread.start()
+        logger.info(f"{role_label} [LIFESPAN] Cleanup periodico STUCK avviato (controllo ogni 5 minuti, thread daemon)")
+    else:
+        # DDT_ROLE=web: NON avviare watchdog/processing/cleanup STUCK
+        logger.info(f"{role_label} [LIFESPAN] Ruolo WEB: watchdog/processing/cleanup STUCK DISABILITATI (gestiti da worker.py)")
         _global_observer = None
-    
-    # Startup - avvia cleanup periodico per documenti STUCK
-    global _cleanup_thread, _cleanup_shutdown_flag
-    _cleanup_shutdown_flag.clear()  # Reset flag all'avvio
-    
-    def stuck_cleanup_loop():
-        """
-        Loop periodico per controllare e marcare documenti PROCESSING bloccati come STUCK.
-        
-        IMPORTANTE: Eseguito in thread daemon separato, NON blocca mai il main thread.
-        Usa Event.wait() invece di time.sleep() per permettere interruzione immediata.
-        """
-        import time
-        from app.processed_documents import check_and_mark_stuck_documents
-        # Esegui cleanup ogni 5 minuti
-        cleanup_interval = 300  # 5 minuti
-        logger.info("🔍 [CLEANUP_LOOP] Cleanup loop STUCK avviato (thread daemon)")
-        
-        while not _cleanup_shutdown_flag.is_set():
-            try:
-                # Usa wait invece di sleep per permettere interruzione immediata (NON-BLOCCANTE)
-                if _cleanup_shutdown_flag.wait(timeout=cleanup_interval):
-                    # Flag di shutdown impostato, esci dal loop
-                    logger.info("🧹 [CLEANUP_LOOP] Shutdown richiesto, terminazione...")
-                    break
-                
-                # Esegui cleanup solo se shutdown non richiesto
-                if not _cleanup_shutdown_flag.is_set():
-                    logger.debug("🔍 [CLEANUP_LOOP] Esecuzione controllo STUCK...")
-                    stuck_count = check_and_mark_stuck_documents()
-                    if stuck_count > 0:
-                        logger.info(f"✅ [CLEANUP_LOOP] Cleanup STUCK: {stuck_count} documento(i) marcato(i) come STUCK")
-                    else:
-                        logger.debug("✅ [CLEANUP_LOOP] Nessun documento STUCK trovato")
-            except Exception as e:
-                logger.error(f"❌ [CLEANUP_LOOP] Errore nel cleanup STUCK: {e}", exc_info=True)
-        
-        logger.info("✅ [CLEANUP_LOOP] Cleanup loop STUCK terminato")
-    
-    # REGOLA FERREA: daemon=True per permettere shutdown veloce
-    # IMPORTANTE: Loop cleanup in thread daemon separato, NON blocca mai il main thread
-    logger.info("🔍 [LIFESPAN] Avvio cleanup thread STUCK...")
-    _cleanup_thread = threading.Thread(target=stuck_cleanup_loop, daemon=True)
-    _cleanup_thread.start()
-    logger.info("✅ [LIFESPAN] Cleanup periodico STUCK avviato (controllo ogni 5 minuti, thread daemon)")
+        _cleanup_thread = None
     
     # Startup completato - yield immediato (NON bloccante)
-    logger.info("✅ [LIFESPAN] Startup completato, yield a uvicorn")
+    logger.info(f"{role_label} [LIFESPAN] Startup completato, yield a uvicorn")
     yield
 
 app = FastAPI(lifespan=lifespan)
@@ -540,28 +548,33 @@ app = FastAPI(lifespan=lifespan)
 async def shutdown_event():
     """
     Handler FastAPI ufficiale per shutdown.
-    Ferma watchdog e cleanup thread senza bloccare.
+    Ferma watchdog e cleanup thread senza bloccare (SOLO se DDT_ROLE=worker).
     Uvicorn gestisce automaticamente SIGTERM/SIGINT.
     """
-    logger.critical("⛔ [SHUTDOWN] Shutdown richiesto, arresto thread/observer...")
+    role_label = "[WEB]" if IS_WEB_ROLE else "[WORKER]"
+    logger.critical(f"{role_label} [SHUTDOWN] Shutdown richiesto, arresto thread/observer...")
     
-    # Ferma cleanup thread PRIMA del watchdog (ordine inverso rispetto startup)
-    try:
-        logger.info("🧹 [SHUTDOWN] Fermata cleanup thread...")
-        stop_cleanup_thread_safely()
-        logger.info("✅ [SHUTDOWN] Cleanup thread fermato")
-    except Exception as e:
-        logger.error(f"❌ [SHUTDOWN] Errore durante shutdown cleanup thread: {e}", exc_info=True)
+    # SOLO per worker: ferma cleanup thread e watchdog
+    if IS_WORKER_ROLE:
+        # Ferma cleanup thread PRIMA del watchdog (ordine inverso rispetto startup)
+        try:
+            logger.info(f"{role_label} [SHUTDOWN] Fermata cleanup thread...")
+            stop_cleanup_thread_safely()
+            logger.info(f"{role_label} [SHUTDOWN] Cleanup thread fermato")
+        except Exception as e:
+            logger.error(f"{role_label} [SHUTDOWN] Errore durante shutdown cleanup thread: {e}", exc_info=True)
+        
+        # Ferma watchdog observer
+        try:
+            logger.info(f"{role_label} [SHUTDOWN] Fermata watchdog observer...")
+            stop_watchdog_safely()
+            logger.info(f"{role_label} [SHUTDOWN] Watchdog observer fermato")
+        except Exception as e:
+            logger.error(f"{role_label} [SHUTDOWN] Errore durante shutdown watchdog: {e}", exc_info=True)
+    else:
+        logger.info(f"{role_label} [SHUTDOWN] Ruolo WEB: nessun thread/observer da fermare")
     
-    # Ferma watchdog observer
-    try:
-        logger.info("🛑 [SHUTDOWN] Fermata watchdog observer...")
-        stop_watchdog_safely()
-        logger.info("✅ [SHUTDOWN] Watchdog observer fermato")
-    except Exception as e:
-        logger.error(f"❌ [SHUTDOWN] Errore durante shutdown watchdog: {e}", exc_info=True)
-    
-    logger.critical("✅ [SHUTDOWN] Shutdown completato (tutti i thread/task fermati)")
+    logger.critical(f"{role_label} [SHUTDOWN] Shutdown completato (tutti i thread/task fermati)")
 
 @app.get("/health", include_in_schema=False)
 def health():
