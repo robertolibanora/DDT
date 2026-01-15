@@ -311,7 +311,7 @@
                 if (response.ok && data.success) {
                     showMessage(`✅ Layout salvato con successo: ${ruleNameInput}`, 'success');
                     setTimeout(() => {
-                        window.location.href = '/rules';
+                        window.location.href = '/models';
                     }, 2000);
                 } else {
                     showMessage(`❌ Errore: ${data.detail || 'Errore sconosciuto'}`, 'error');
