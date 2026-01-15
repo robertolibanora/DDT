@@ -121,12 +121,6 @@ class PreviewModal {
                                 </div>
 
                                 <div class="form-group">
-                                    <label for="preview-data-inserimento">📆 Data di Inserimento</label>
-                                    <input type="date" id="preview-data-inserimento" name="data_inserimento" required>
-                                    <small class="form-help">Data di archiviazione (scelta manualmente)</small>
-                                </div>
-
-                                <div class="form-group">
                                     <label for="preview-mittente">🏢 Mittente</label>
                                     <input type="text" id="preview-mittente" name="mittente" required>
                                 </div>
@@ -580,7 +574,6 @@ class PreviewModal {
 
         // Popola i campi (solo se abbiamo dati estratti)
         const dataEl = document.getElementById('preview-data');
-        const dataInserimentoEl = document.getElementById('preview-data-inserimento');
         const mittenteEl = document.getElementById('preview-mittente');
         const destinatarioEl = document.getElementById('preview-destinatario');
         const numeroEl = document.getElementById('preview-numero-documento');
@@ -589,15 +582,6 @@ class PreviewModal {
         if (hasExtractedData) {
             // Popola i campi con i dati estratti
             if (dataEl) dataEl.value = extractedData.data || '';
-            
-            // Imposta data_inserimento: default a oggi, ma controlla se già salvata
-            if (dataInserimentoEl) {
-                // Prova a recuperare data_inserimento salvata (se documento già visto)
-                // Per ora usa sempre data odierna come default
-                const today = new Date();
-                const todayStr = today.toISOString().split('T')[0]; // YYYY-MM-DD
-                dataInserimentoEl.value = todayStr;
-            }
             
             if (mittenteEl) mittenteEl.value = extractedData.mittente || '';
             if (destinatarioEl) destinatarioEl.value = extractedData.destinatario || '';
@@ -637,12 +621,6 @@ class PreviewModal {
             if (dataEl) {
                 dataEl.value = '';
                 dataEl.disabled = true;
-            }
-            if (dataInserimentoEl) {
-                const today = new Date();
-                const todayStr = today.toISOString().split('T')[0];
-                dataInserimentoEl.value = todayStr;
-                dataInserimentoEl.disabled = true;
             }
             if (mittenteEl) {
                 mittenteEl.value = '';
@@ -787,22 +765,35 @@ class PreviewModal {
 
 
     async saveData() {
+        // Ottieni la data di output dalla configurazione globale
+        let dataInserimento = null;
+        try {
+            const response = await fetch('/api/config/output-date', {
+                credentials: 'include'
+            });
+            if (response.ok) {
+                const data = await response.json();
+                if (data.success) {
+                    dataInserimento = data.output_date;
+                }
+            }
+        } catch (error) {
+            console.error('Errore lettura data output:', error);
+            alert('⚠️ Errore nel recupero della data di destinazione. Riprova.');
+            return;
+        }
+        
+        if (!dataInserimento) {
+            alert('⚠️ Impossibile recuperare la data di destinazione. Verifica la configurazione nella dashboard.');
+            return;
+        }
+        
         const formData = new FormData();
         formData.append('file_hash', document.getElementById('preview-file-hash').value);
         formData.append('file_name', document.getElementById('preview-file-name').value);
         formData.append('original_data', document.getElementById('preview-original-data').value);
         formData.append('data', document.getElementById('preview-data').value);
-        
-        // Data di inserimento: converti da YYYY-MM-DD a gg-mm-yyyy
-        const dataInserimentoInput = document.getElementById('preview-data-inserimento');
-        if (!dataInserimentoInput || !dataInserimentoInput.value) {
-            alert('⚠️ La data di inserimento è obbligatoria');
-            return;
-        }
-        const dataInserimentoISO = dataInserimentoInput.value; // YYYY-MM-DD
-        const [year, month, day] = dataInserimentoISO.split('-');
-        const dataInserimentoFormatted = `${day}-${month}-${year}`; // gg-mm-yyyy
-        formData.append('data_inserimento', dataInserimentoFormatted);
+        formData.append('data_inserimento', dataInserimento); // Usa sempre la data globale
         
         formData.append('mittente', document.getElementById('preview-mittente').value);
         formData.append('destinatario', document.getElementById('preview-destinatario').value);

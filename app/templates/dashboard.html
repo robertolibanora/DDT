@@ -45,6 +45,49 @@
 {% endblock %}
 
 {% block content %}
+    <!-- Sezione configurazione data cartella output -->
+    <div id="output-date-config" class="output-date-config">
+        <div class="output-date-content">
+            <div class="output-date-info">
+                <div class="output-date-icon">📁</div>
+                <div class="output-date-text">
+                    <div class="output-date-label">Cartella di destinazione attiva</div>
+                    <div class="output-date-value">
+                        Data: <span id="current-output-date">--</span>
+                        <span class="output-date-status">(attiva)</span>
+                    </div>
+                </div>
+            </div>
+            <button id="edit-output-date-btn" class="btn-edit-output-date" title="Modifica data cartella di destinazione">
+                ✏️ Modifica Data
+            </button>
+        </div>
+        
+        <!-- Modal per modifica data -->
+        <div id="output-date-modal" class="output-date-modal hidden">
+            <div class="output-date-modal-content">
+                <div class="output-date-modal-header">
+                    <h3>Modifica Data Cartella di Destinazione</h3>
+                    <button id="close-output-date-modal" class="output-date-modal-close">✕</button>
+                </div>
+                <div class="output-date-modal-body">
+                    <p class="output-date-modal-warning">
+                        ⚠️ <strong>Attenzione:</strong> La data che imposti verrà usata per <strong>TUTTI</strong> i documenti processati da questo momento in poi.
+                    </p>
+                    <div class="form-group">
+                        <label for="output-date-input">Data cartella (gg-mm-yyyy)</label>
+                        <input type="date" id="output-date-input" required>
+                        <small class="form-help">Tutti i documenti verranno salvati nella cartella con questa data</small>
+                    </div>
+                </div>
+                <div class="output-date-modal-actions">
+                    <button id="save-output-date-btn" class="btn btn-primary">Salva</button>
+                    <button id="cancel-output-date-btn" class="btn btn-secondary">Annulla</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="stats">
         <div class="stat-item">
             <div class="stat-label">Totale DDT</div>
@@ -112,6 +155,31 @@
         function formatNumber(num) {
             const n = parseFloat(num);
             return isNaN(n) ? '0.000' : n.toFixed(3);
+        }
+
+        /**
+         * Normalizza il numero documento rimuovendo suffissi testuali come "nuovo"
+         * @param {string} numeroDoc - Numero documento da normalizzare
+         * @returns {string} Numero documento pulito
+         */
+        function normalizeNumeroDocumento(numeroDoc) {
+            if (!numeroDoc || typeof numeroDoc !== 'string') {
+                return numeroDoc || '-';
+            }
+            
+            // Rimuovi "nuovo" (case-insensitive) e spazi extra
+            let normalized = numeroDoc.trim();
+            
+            // Rimuovi "nuovo" alla fine del testo (con o senza spazi)
+            normalized = normalized.replace(/\s*nuovo\s*$/i, '');
+            
+            // Rimuovi "nuovo" all'inizio del testo (con o senza spazi)
+            normalized = normalized.replace(/^\s*nuovo\s*/i, '');
+            
+            // Rimuovi spazi multipli e trim finale
+            normalized = normalized.replace(/\s+/g, ' ').trim();
+            
+            return normalized || '-';
         }
 
         // Esponi refreshData globalmente per il modal
@@ -267,9 +335,10 @@
                 // Mostra toast notification per nuovo documento (solo se non è il primo caricamento)
                 if (previousRowsData.length > 0 && newRows.length > 0) {
                     const newestRow = newRows[0];
+                    const numeroDocNormalized = normalizeNumeroDocumento(newestRow.numero_documento || 'DDT');
                     showToast({
                         type: 'success',
-                        message: `Documento salvato: ${newestRow.numero_documento || 'DDT'}`,
+                        message: `Documento salvato: ${numeroDocNormalized}`,
                         duration: 3000
                     });
                 }
@@ -292,7 +361,8 @@
             
             const badges = getRowBadges(row, isNewest);
             const kg = formatNumber(row.totale_kg);
-            const numeroDoc = escapeHtml(row.numero_documento || '-');
+            const numeroDocRaw = row.numero_documento || '-';
+            const numeroDoc = escapeHtml(normalizeNumeroDocumento(numeroDocRaw));
             const mittente = escapeHtml(row.mittente || '');
             
             tr.innerHTML = `
@@ -312,7 +382,8 @@
         function createTableRowHTML(row, isNewest, rowId) {
             const badges = getRowBadges(row, isNewest);
             const kg = formatNumber(row.totale_kg);
-            const numeroDoc = escapeHtml(row.numero_documento || '-');
+            const numeroDocRaw = row.numero_documento || '-';
+            const numeroDoc = escapeHtml(normalizeNumeroDocumento(numeroDocRaw));
             const mittente = escapeHtml(row.mittente || '');
             const rowClass = isNewest ? 'newest-row' : '';
             
@@ -437,6 +508,146 @@
         
         // Aggiungi event listener al pulsante
         document.getElementById('clear-all-btn').addEventListener('click', clearAllDDT);
+
+        // Gestione data cartella output
+        let currentOutputDate = null;
+        
+        /**
+         * Carica la data di output corrente dalla configurazione globale
+         */
+        async function loadOutputDate() {
+            try {
+                const response = await fetch('/api/config/output-date', {
+                    credentials: 'include'
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.success) {
+                        currentOutputDate = data.output_date;
+                        const dateEl = document.getElementById('current-output-date');
+                        if (dateEl) {
+                            // Converti da gg-mm-yyyy a formato leggibile
+                            const [day, month, year] = currentOutputDate.split('-');
+                            dateEl.textContent = `${day}/${month}/${year}`;
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Errore caricamento data output:', error);
+            }
+        }
+        
+        /**
+         * Mostra modal per modifica data output
+         */
+        function showOutputDateModal() {
+            const modal = document.getElementById('output-date-modal');
+            const input = document.getElementById('output-date-input');
+            
+            if (modal && input && currentOutputDate) {
+                // Converti da gg-mm-yyyy a YYYY-MM-DD per input date
+                const [day, month, year] = currentOutputDate.split('-');
+                const isoDate = `${year}-${month}-${day}`;
+                input.value = isoDate;
+                
+                modal.classList.remove('hidden');
+                input.focus();
+            }
+        }
+        
+        /**
+         * Nascondi modal per modifica data output
+         */
+        function hideOutputDateModal() {
+            const modal = document.getElementById('output-date-modal');
+            if (modal) {
+                modal.classList.add('hidden');
+            }
+        }
+        
+        /**
+         * Salva nuova data output
+         */
+        async function saveOutputDate() {
+            const input = document.getElementById('output-date-input');
+            if (!input || !input.value) {
+                alert('⚠️ Seleziona una data');
+                return;
+            }
+            
+            // Converti da YYYY-MM-DD a gg-mm-yyyy
+            const isoDate = input.value;
+            const [year, month, day] = isoDate.split('-');
+            const dateStr = `${day}-${month}-${year}`;
+            
+            const saveBtn = document.getElementById('save-output-date-btn');
+            const originalText = saveBtn?.textContent || 'Salva';
+            
+            try {
+                if (saveBtn) {
+                    saveBtn.disabled = true;
+                    saveBtn.textContent = 'Salvataggio...';
+                }
+                
+                const formData = new FormData();
+                formData.append('output_date', dateStr);
+                
+                const response = await fetch('/api/config/output-date', {
+                    method: 'POST',
+                    body: formData,
+                    credentials: 'include'
+                });
+                
+                const data = await response.json();
+                
+                if (response.ok && data.success) {
+                    // Aggiorna visualizzazione
+                    currentOutputDate = dateStr;
+                    await loadOutputDate();
+                    
+                    // Mostra messaggio di successo
+                    if (typeof showToast === 'function') {
+                        showToast({
+                            type: 'success',
+                            message: `✅ Data cartella aggiornata: ${day}/${month}/${year}`,
+                            duration: 3000
+                        });
+                    }
+                    
+                    hideOutputDateModal();
+                } else {
+                    throw new Error(data.detail || 'Errore durante il salvataggio');
+                }
+            } catch (error) {
+                console.error('Errore salvataggio data output:', error);
+                alert(`❌ Errore: ${error.message}`);
+            } finally {
+                if (saveBtn) {
+                    saveBtn.disabled = false;
+                    saveBtn.textContent = originalText;
+                }
+            }
+        }
+        
+        // Setup event listeners per gestione data output
+        document.getElementById('edit-output-date-btn')?.addEventListener('click', showOutputDateModal);
+        document.getElementById('close-output-date-modal')?.addEventListener('click', hideOutputDateModal);
+        document.getElementById('cancel-output-date-btn')?.addEventListener('click', hideOutputDateModal);
+        document.getElementById('save-output-date-btn')?.addEventListener('click', saveOutputDate);
+        
+        // Chiudi modal con ESC
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                const modal = document.getElementById('output-date-modal');
+                if (modal && !modal.classList.contains('hidden')) {
+                    hideOutputDateModal();
+                }
+            }
+        });
+        
+        // Carica data output all'avvio
+        loadOutputDate();
 
         // Ottimizzazione: usa Intersection Observer per refresh solo quando visibile
         let isPageVisible = true;

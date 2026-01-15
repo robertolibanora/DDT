@@ -270,7 +270,7 @@ async def save_preview(
     destinatario: str = Form(...),
     numero_documento: str = Form(...),
     totale_kg: str = Form(...),
-    data_inserimento: str = Form(...),  # Data di inserimento scelta dall'utente (gg-mm-yyyy)
+    data_inserimento: str = Form(None),  # DEPRECATO: ignorato, viene sempre usata la data globale dalla configurazione
     original_data: str = Form(None),
     annotations: str = Form(None),
     auth: bool = Depends(require_authentication)
@@ -299,12 +299,19 @@ async def save_preview(
             logger.warning("Impossibile parsare original_data, uso corrected_data")
             original_data_parsed = corrected_data
         
-        # Valida data_inserimento
-        if not data_inserimento or not data_inserimento.strip():
-            raise HTTPException(status_code=422, detail="data_inserimento è obbligatoria")
-        
-        # Normalizza formato data (gg-mm-yyyy)
-        data_inserimento = data_inserimento.strip()
+        # IMPORTANTE: Usa sempre la data globale dalla configurazione
+        # Ignora data_inserimento passata dal form (mantenuta per retrocompatibilità)
+        from app.global_config import get_active_output_date
+        try:
+            data_inserimento = get_active_output_date()
+            logger.info(f"📅 [PREVIEW] Usata data output globale: {data_inserimento}")
+        except Exception as e:
+            logger.error(f"Errore lettura data output globale: {e}", exc_info=True)
+            # Fallback: usa quella passata dal form se disponibile
+            if not data_inserimento or not data_inserimento.strip():
+                raise HTTPException(status_code=500, detail="Impossibile recuperare la data di destinazione. Verifica la configurazione nella dashboard.")
+            data_inserimento = data_inserimento.strip()
+            logger.warning(f"⚠️ [PREVIEW] Fallback a data_inserimento dal form: {data_inserimento}")
         
         # Cerca il file originale nella cartella inbox (priorità)
         file_path = None

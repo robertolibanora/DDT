@@ -202,6 +202,12 @@ def get_layout_rules_file() -> Path:
     return app_dir / "layout_rules" / "layout_rules.json"
 
 
+def get_global_config_file() -> Path:
+    """Restituisce il path assoluto del file global_config.json"""
+    app_dir = get_app_dir()
+    return app_dir / "global_config.json"
+
+
 def safe_copy(source: Path, dest: Path) -> Path:
     """
     Copia un file in modo sicuro usando path assoluti

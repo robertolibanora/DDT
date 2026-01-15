@@ -1112,6 +1112,55 @@ async def get_pending_documents_count(request: Request, auth: bool = Depends(che
         logger.error(f"Errore conteggio documenti in attesa: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Errore durante il conteggio: {str(e)}")
 
+@app.get("/api/config/output-date")
+async def get_output_date(request: Request, auth: bool = Depends(check_auth)):
+    """
+    Endpoint per ottenere la data attiva corrente per la cartella di output.
+    
+    Restituisce la data in formato gg-mm-yyyy che viene usata per tutti i documenti processati.
+    """
+    try:
+        from app.global_config import get_active_output_date
+        date_str = get_active_output_date()
+        return JSONResponse({
+            "success": True,
+            "output_date": date_str,
+            "format": "gg-mm-yyyy"
+        })
+    except Exception as e:
+        logger.error(f"Errore lettura data output: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Errore durante la lettura: {str(e)}")
+
+@app.post("/api/config/output-date")
+async def set_output_date(
+    request: Request,
+    output_date: str = Form(...),
+    auth: bool = Depends(check_auth)
+):
+    """
+    Endpoint per impostare la data attiva per la cartella di output.
+    
+    Questa data viene usata per TUTTI i documenti processati da questo momento in poi.
+    
+    Args:
+        output_date: Data in formato gg-mm-yyyy (es: "15-01-2026")
+    """
+    try:
+        from app.global_config import set_active_output_date
+        set_active_output_date(output_date)
+        logger.info(f"📅 [WEB] Data output aggiornata da operatore: {output_date}")
+        return JSONResponse({
+            "success": True,
+            "message": f"Data cartella di output aggiornata: {output_date}",
+            "output_date": output_date
+        })
+    except ValueError as e:
+        logger.error(f"Errore validazione data output: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Errore aggiornamento data output: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Errore durante l'aggiornamento: {str(e)}")
+
 @app.post("/data/clear")
 async def delete_all_ddt(request: Request, auth: bool = Depends(check_auth)):
     """Endpoint per cancellare tutti i DDT dal file Excel"""
