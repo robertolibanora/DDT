@@ -1022,8 +1022,8 @@ async def get_data(request: Request, auth: bool = Depends(check_auth)):
     """
     Endpoint API per ottenere tutti i DDT in formato JSON.
     
-    REGOLA FERREA: Ritorna SEMPRE una struttura completa, anche se vuota o in caso di errore.
-    Questo garantisce che il frontend non resti mai bloccato in caricamento infinito.
+    IMPORTANTE: NON maschera OSError su path critici (excel directory).
+    Se la directory excel non è scrivibile, solleva HTTPException 500 esplicitamente.
     """
     try:
         data = read_excel_as_dict()
@@ -1042,10 +1042,16 @@ async def get_data(request: Request, auth: bool = Depends(check_auth)):
             logger.info("Dataset DDT vuoto - nessun documento presente")
         
         return JSONResponse(data)
+    except (OSError, IOError, PermissionError) as e:
+        # Errori di I/O su path critici: NON mascherare, solleva HTTPException 500
+        logger.error("Errore I/O lettura dati Excel: %s", str(e), exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Errore accesso directory Excel: {str(e)}. Verifica i permessi di scrittura su /var/www/DDT/excel"
+        )
     except Exception as e:
-        logger.error(f"Errore lettura dati: {e}", exc_info=True)
-        # REGOLA FERREA: In caso di errore, ritorna struttura completa con campo error
-        # NON sollevare HTTPException per non bloccare il frontend
+        # Altri errori: fallback per non bloccare il frontend
+        logger.error("Errore lettura dati: %s", str(e), exc_info=True)
         return JSONResponse({
             "rows": [],
             "error": "fallback",

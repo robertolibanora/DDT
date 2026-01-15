@@ -25,18 +25,29 @@ HEADERS = ["data", "mittente", "destinatario", "numero_documento", "totale_kg"]
 
 
 def _ensure_excel_exists() -> None:
-    """Crea il file Excel con gli header se non esiste"""
+    """
+    Crea il file Excel con gli header se non esiste
+    
+    IMPORTANTE: NON maschera OSError su path critici (excel directory).
+    Se la directory non è scrivibile, OSError viene propagato esplicitamente.
+    
+    Raises:
+        OSError: Se la directory excel non è scrivibile o non può essere creata
+        IOError: Se c'è un errore di I/O durante la scrittura del file
+    """
     from app.paths import get_excel_file
     excel_file = get_excel_file()
     
     if excel_file.exists():
         return
     
+    # Assicura che la directory Excel esista usando sistema paths
+    # Se la directory non è scrivibile, ensure_dir() solleverà OSError esplicitamente
+    from app.paths import get_excel_dir
+    excel_dir = get_excel_dir()  # Può sollevare OSError se directory non scrivibile
+    
+    # Crea il file Excel
     try:
-        # Assicura che la directory Excel esista usando sistema paths
-        from app.paths import get_excel_dir, ensure_dir
-        excel_dir = get_excel_dir()
-        
         wb = Workbook()
         ws = wb.active
         ws.append(HEADERS)
@@ -47,9 +58,14 @@ def _ensure_excel_exists() -> None:
             cell.font = Font(bold=True)
         
         wb.save(str(excel_file))
-        logger.info(f"File Excel creato: {excel_file}")
+        logger.info("File Excel creato: %s", str(excel_file))
+    except (OSError, IOError, PermissionError) as e:
+        # Errori di I/O su file critico: propaga esplicitamente
+        logger.error("Errore creazione file Excel: %s", str(e))
+        raise IOError(f"Impossibile creare file Excel in {excel_dir}: {e}") from e
     except Exception as e:
-        logger.error(f"Errore creazione file Excel: {e}")
+        # Altri errori: propaga comunque
+        logger.error("Errore creazione file Excel: %s", str(e))
         raise
 
 
@@ -68,11 +84,15 @@ def append_to_excel(data: Dict[str, Any]) -> None:
     """
     Aggiunge una riga al file Excel in modo thread-safe e atomico
     
+    IMPORTANTE: NON maschera OSError/IOError su path critici (excel directory).
+    Se la directory non è scrivibile, OSError viene propagato esplicitamente.
+    
     Args:
         data: Dizionario con i dati del DDT (può essere dict o DDTData)
         
     Raises:
         ValueError: Se i dati non sono validi
+        OSError: Se la directory excel non è scrivibile
         IOError: Se c'è un errore di I/O con il file
     """
     try:
@@ -92,6 +112,7 @@ def append_to_excel(data: Dict[str, Any]) -> None:
         ]
         
         # Operazione atomica con lock
+        # _excel_operation() chiama _ensure_excel_exists() che può sollevare OSError
         with _excel_operation():
             # Carica il workbook
             try:
@@ -99,8 +120,8 @@ def append_to_excel(data: Dict[str, Any]) -> None:
                 wb = load_workbook(str(get_excel_file()))
                 ws = wb.active
             except (InvalidFileException, FileNotFoundError) as e:
-                logger.error(f"Errore caricamento Excel: {e}")
-                # Ricrea il file
+                logger.error("Errore caricamento Excel: %s", str(e))
+                # Ricrea il file (può sollevare OSError se directory non scrivibile)
                 _ensure_excel_exists()
                 from app.paths import get_excel_file
                 wb = load_workbook(str(get_excel_file()))
@@ -118,16 +139,26 @@ def append_to_excel(data: Dict[str, Any]) -> None:
                 from app.paths import get_excel_file
                 excel_file = get_excel_file()
                 wb.save(str(excel_file))
-                logger.info(f"DDT aggiunto a Excel: {ddt_data.numero_documento}")
-            except PermissionError:
-                logger.error(f"Errore: file Excel è aperto da un altro programma")
-                raise IOError("Il file Excel è aperto. Chiudilo e riprova.")
-            except Exception as e:
-                logger.error(f"Errore salvataggio Excel: {e}")
+                logger.info("DDT aggiunto a Excel: %s", ddt_data.numero_documento)
+            except PermissionError as e:
+                logger.error("Errore: file Excel è aperto da un altro programma")
+                raise IOError("Il file Excel è aperto. Chiudilo e riprova.") from e
+            except (OSError, IOError) as e:
+                # Errori di I/O: propaga esplicitamente
+                logger.error("Errore salvataggio Excel: %s", str(e))
                 raise
+            except Exception as e:
+                logger.error("Errore salvataggio Excel: %s", str(e))
+                raise IOError(f"Errore salvataggio Excel: {e}") from e
         
+    except (OSError, IOError, PermissionError):
+        # Errori di I/O su path critici: propaga esplicitamente senza mascherare
+        raise
+    except ValueError:
+        # Errori di validazione: propaga esplicitamente
+        raise
     except Exception as e:
-        logger.error(f"Errore aggiunta DDT a Excel: {e}", exc_info=True)
+        logger.error("Errore aggiunta DDT a Excel: %s", str(e), exc_info=True)
         raise ValueError(f"Errore durante il salvataggio: {str(e)}") from e
 
 
@@ -135,6 +166,9 @@ def update_or_append_to_excel(data: Dict[str, Any]) -> bool:
     """
     Aggiorna una riga esistente in Excel se il documento esiste già, altrimenti aggiunge una nuova riga
     Identifica i documenti duplicati basandosi su numero_documento e mittente
+    
+    IMPORTANTE: NON maschera OSError/IOError su path critici (excel directory).
+    Se la directory non è scrivibile, OSError viene propagato esplicitamente.
     
     Args:
         data: Dizionario con i dati del DDT (può essere dict o DDTData)
@@ -144,6 +178,7 @@ def update_or_append_to_excel(data: Dict[str, Any]) -> bool:
         
     Raises:
         ValueError: Se i dati non sono validi
+        OSError: Se la directory excel non è scrivibile
         IOError: Se c'è un errore di I/O con il file
     """
     try:
@@ -244,20 +279,30 @@ def update_or_append_to_excel(data: Dict[str, Any]) -> bool:
                 from app.paths import get_excel_file
                 wb.save(str(get_excel_file()))
                 if updated:
-                    logger.info(f"DDT aggiornato in Excel: {ddt_data.numero_documento}")
+                    logger.info("DDT aggiornato in Excel: %s", ddt_data.numero_documento)
                 else:
-                    logger.info(f"DDT aggiunto a Excel: {ddt_data.numero_documento}")
-            except PermissionError:
-                logger.error(f"Errore: file Excel è aperto da un altro programma")
-                raise IOError("Il file Excel è aperto. Chiudilo e riprova.")
-            except Exception as e:
-                logger.error(f"Errore salvataggio Excel: {e}")
+                    logger.info("DDT aggiunto a Excel: %s", ddt_data.numero_documento)
+            except PermissionError as e:
+                logger.error("Errore: file Excel è aperto da un altro programma")
+                raise IOError("Il file Excel è aperto. Chiudilo e riprova.") from e
+            except (OSError, IOError) as e:
+                # Errori di I/O: propaga esplicitamente
+                logger.error("Errore salvataggio Excel: %s", str(e))
                 raise
+            except Exception as e:
+                logger.error("Errore salvataggio Excel: %s", str(e))
+                raise IOError(f"Errore salvataggio Excel: {e}") from e
             
             return updated
         
+    except (OSError, IOError, PermissionError):
+        # Errori di I/O su path critici: propaga esplicitamente senza mascherare
+        raise
+    except ValueError:
+        # Errori di validazione: propaga esplicitamente
+        raise
     except Exception as e:
-        logger.error(f"Errore aggiornamento/aggiunta DDT a Excel: {e}", exc_info=True)
+        logger.error("Errore aggiornamento/aggiunta DDT a Excel: %s", str(e), exc_info=True)
         raise ValueError(f"Errore durante il salvataggio: {str(e)}") from e
 
 
