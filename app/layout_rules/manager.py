@@ -195,23 +195,42 @@ def load_layout_rules(force_reload: bool = False) -> Dict[str, LayoutRule]:
     try:
         with open(LAYOUT_RULES_FILE, 'r', encoding='utf-8') as f:
             file_content = f.read()
-            if not file_content.strip():
-                logger.error(f"❌ [FAIL-FAST] File layout rules è vuoto: {LAYOUT_RULES_FILE}")
-                logger.info(f"✅ [FAIL-FAST] Loaded 0 layout rules: []")
-                # Aggiorna cache vuota
-                _layout_rules_cache = {}
-                _layout_rules_cache_timestamp = None
-                return {}
-            data = json.loads(file_content)
         
-        if not data:
-            logger.warning(f"❌ [FAIL-FAST] File layout rules contiene dati vuoti: {LAYOUT_RULES_FILE}")
-            logger.info(f"✅ [FAIL-FAST] Loaded 0 layout rules: []")
+        # 🔴 FILE VUOTO → FAIL-FAST CONTROLLATO
+        if not file_content.strip():
+            logger.error("❌ [FAIL-FAST] File layout rules è vuoto: %s", str(LAYOUT_RULES_FILE))
+            logger.info("ℹ️ [LAYOUT_RULES] Nessun layout rule caricato (fallback automatico su AI)")
             # Aggiorna cache vuota
             _layout_rules_cache = {}
             _layout_rules_cache_timestamp = None
             return {}
         
+        # 🔴 JSON NON VALIDO → FAIL-FAST CONTROLLATO
+        try:
+            data = json.loads(file_content)
+        except json.JSONDecodeError as e:
+            logger.error("❌ [FAIL-FAST] layout_rules.json NON valido (%s): %s", str(LAYOUT_RULES_FILE), str(e))
+            logger.info("ℹ️ [LAYOUT_RULES] Nessun layout rule caricato (fallback automatico su AI)")
+            # Aggiorna cache vuota
+            _layout_rules_cache = {}
+            _layout_rules_cache_timestamp = None
+            return {}
+        
+        # 🟢 JSON VALIDO MA VUOTO O NON DICT
+        if not isinstance(data, dict):
+            logger.error("❌ [FAIL-FAST] layout_rules.json non contiene un dict valido: %s", str(LAYOUT_RULES_FILE))
+            logger.info("ℹ️ [LAYOUT_RULES] Nessun layout rule caricato (fallback automatico su AI)")
+            _layout_rules_cache = {}
+            _layout_rules_cache_timestamp = None
+            return {}
+        
+        if not data:
+            logger.warning("⚠️ [LAYOUT_RULES] layout_rules.json valido ma senza regole")
+            _layout_rules_cache = {}
+            _layout_rules_cache_timestamp = None
+            return {}
+        
+        # 🟢 CASO NORMALE: Converti JSON in oggetti LayoutRule
         rules = {}
         sender_counts = {}
         
@@ -226,19 +245,12 @@ def load_layout_rules(force_reload: bool = False) -> Dict[str, LayoutRule]:
                 sender_counts[sender_normalized] = sender_counts.get(sender_normalized, 0) + 1
                 
             except Exception as e:
-                logger.warning(f"⚠️ [FAIL-FAST] Errore caricamento regola {rule_name}: {e} - skip regola")
+                logger.warning("⚠️ [FAIL-FAST] Errore caricamento regola %s: %s - skip regola", rule_name, str(e))
                 continue
         
         # Log dettagliato per mittente
         for sender_norm, count in sender_counts.items():
-            logger.info(f"📦 Caricate {count} layout model(s) per sender: {sender_norm}")
-        
-        # Log esplicito con lista delle chiavi
-        rule_keys = list(rules.keys())
-        if rule_keys:
-            logger.info(f"✅ [FAIL-FAST] Loaded {len(rules)} layout rules: {rule_keys}")
-        else:
-            logger.info(f"✅ [FAIL-FAST] Loaded {len(rules)} layout rules: []")
+            logger.info("📦 Caricate %d layout model(s) per sender: %s", count, sender_norm)
         
         # Aggiorna cache
         _layout_rules_cache = rules
@@ -247,19 +259,18 @@ def load_layout_rules(force_reload: bool = False) -> Dict[str, LayoutRule]:
         except Exception:
             _layout_rules_cache_timestamp = None
         
+        # Log esplicito con lista delle chiavi
+        rule_keys = list(rules.keys())
+        if rule_keys:
+            logger.info("✅ [LAYOUT_RULES] Caricate %d layout rule(s): %s", len(rules), rule_keys)
+        else:
+            logger.info("✅ [LAYOUT_RULES] Caricate %d layout rule(s)", len(rules))
+        
         return rules
-    except json.JSONDecodeError as e:
-        logger.error("❌ [FAIL-FAST] Errore parsing JSON layout rules da %s: %s", str(LAYOUT_RULES_FILE), str(e))
-        logger.error("❌ [FAIL-FAST] File potrebbe essere corrotto o malformato - ritorno dict vuoto immediatamente")
-        logger.info("✅ [FAIL-FAST] Loaded 0 layout rules: []")
-        # Aggiorna cache vuota
-        _layout_rules_cache = {}
-        _layout_rules_cache_timestamp = None
-        return {}
+        
     except Exception as e:
-        logger.error(f"❌ [FAIL-FAST] Errore caricamento layout rules da {LAYOUT_RULES_FILE}: {e}", exc_info=True)
-        logger.info(f"✅ [FAIL-FAST] Loaded 0 layout rules: []")
-        # Aggiorna cache vuota
+        # 🔥 ULTIMA RETE DI SICUREZZA — MAI CRASHARE IL SISTEMA
+        logger.exception("💥 [CRITICAL] Errore imprevisto nel caricamento layout rules: %s", str(e))
         _layout_rules_cache = {}
         _layout_rules_cache_timestamp = None
         return {}

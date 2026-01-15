@@ -1019,12 +1019,38 @@ except Exception as e:
 
 @app.get("/data")
 async def get_data(request: Request, auth: bool = Depends(check_auth)):
-    """Endpoint API per ottenere tutti i DDT in formato JSON"""
+    """
+    Endpoint API per ottenere tutti i DDT in formato JSON.
+    
+    REGOLA FERREA: Ritorna SEMPRE una struttura completa, anche se vuota o in caso di errore.
+    Questo garantisce che il frontend non resti mai bloccato in caricamento infinito.
+    """
     try:
-        return read_excel_as_dict()
+        data = read_excel_as_dict()
+        # Garantisce struttura completa anche se read_excel_as_dict() ritorna None o {}
+        if not data or not isinstance(data, dict):
+            logger.warning("read_excel_as_dict() ha ritornato None o struttura non valida, uso fallback")
+            data = {"rows": []}
+        
+        # Assicura che 'rows' sia sempre presente e sia una lista
+        if "rows" not in data or not isinstance(data.get("rows"), list):
+            logger.warning("Struttura dati incompleta, normalizzo a lista vuota")
+            data = {"rows": []}
+        
+        # Log informativo se dataset vuoto (non è un errore)
+        if len(data.get("rows", [])) == 0:
+            logger.info("Dataset DDT vuoto - nessun documento presente")
+        
+        return JSONResponse(data)
     except Exception as e:
         logger.error(f"Errore lettura dati: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Errore durante la lettura dei dati: {str(e)}")
+        # REGOLA FERREA: In caso di errore, ritorna struttura completa con campo error
+        # NON sollevare HTTPException per non bloccare il frontend
+        return JSONResponse({
+            "rows": [],
+            "error": "fallback",
+            "error_message": str(e)
+        })
 
 @app.get("/api/document-status/{file_hash}")
 async def get_document_status_endpoint(file_hash: str, request: Request, auth: bool = Depends(check_auth)):
@@ -1167,7 +1193,11 @@ async def convert_stuck_to_error_endpoint(
 
 @app.get("/api/watchdog-queue")
 async def get_watchdog_queue(request: Request, auth: bool = Depends(check_auth)):
-    """Endpoint per ottenere gli elementi in coda dal watchdog - garantisce base64 per rete locale"""
+    """
+    Endpoint per ottenere gli elementi in coda dal watchdog - garantisce base64 per rete locale.
+    
+    REGOLA FERREA: Ritorna SEMPRE una struttura completa, anche in caso di errore.
+    """
     try:
         from app.watchdog_queue import get_pending_items, cleanup_old_items
         from app.config import INBOX_DIR
@@ -1177,6 +1207,15 @@ async def get_watchdog_queue(request: Request, auth: bool = Depends(check_auth))
         cleanup_old_items()
         
         items = get_pending_items()
+        
+        # Garantisce che items sia sempre una lista
+        if not isinstance(items, list):
+            logger.warning("get_pending_items() ha ritornato tipo non valido, normalizzo a lista vuota")
+            items = []
+        
+        # Log informativo se coda vuota (non è un errore)
+        if len(items) == 0:
+            logger.debug("Coda watchdog vuota - nessun documento in attesa")
         
         # Assicurati che ogni item abbia il pdf_base64 (per compatibilità rete locale)
         for item in items:
@@ -1221,7 +1260,14 @@ async def get_watchdog_queue(request: Request, auth: bool = Depends(check_auth))
         })
     except Exception as e:
         logger.error(f"Errore lettura coda watchdog: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Errore durante la lettura della coda: {str(e)}")
+        # REGOLA FERREA: In caso di errore, ritorna struttura completa con campo error
+        # NON sollevare HTTPException per non bloccare il frontend
+        return JSONResponse({
+            "success": False,
+            "items": [],
+            "error": "fallback",
+            "error_message": str(e)
+        })
 
 @app.post("/api/watchdog-queue/{queue_id}/process")
 async def process_queue_item(queue_id: str, request: Request, auth: bool = Depends(check_auth)):
@@ -1266,10 +1312,20 @@ async def get_pending_documents_count(request: Request, auth: bool = Depends(che
     - PROCESSING: in elaborazione
     - READY_FOR_REVIEW: pronti per revisione
     - STUCK: bloccati e richiedono azione manuale
+    
+    REGOLA FERREA: Ritorna SEMPRE una struttura completa, anche in caso di errore.
     """
     try:
         from app.processed_documents import count_pending_documents
         count = count_pending_documents()
+        
+        # Normalizza count a intero (garantisce tipo corretto)
+        count = int(count) if count is not None else 0
+        
+        # Log informativo se nessun documento in attesa (non è un errore)
+        if count == 0:
+            logger.debug("Nessun documento in attesa di intervento")
+        
         return JSONResponse({
             "success": True,
             "count": count,
@@ -1277,7 +1333,15 @@ async def get_pending_documents_count(request: Request, auth: bool = Depends(che
         })
     except Exception as e:
         logger.error(f"Errore conteggio documenti in attesa: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Errore durante il conteggio: {str(e)}")
+        # REGOLA FERREA: In caso di errore, ritorna struttura completa con campo error
+        # NON sollevare HTTPException per non bloccare il frontend
+        return JSONResponse({
+            "success": False,
+            "count": 0,
+            "has_pending": False,
+            "error": "fallback",
+            "error_message": str(e)
+        })
 
 @app.get("/api/config/output-date")
 async def get_output_date(request: Request, auth: bool = Depends(check_auth)):
@@ -1285,10 +1349,18 @@ async def get_output_date(request: Request, auth: bool = Depends(check_auth)):
     Endpoint per ottenere la data attiva corrente per la cartella di output.
     
     Restituisce la data in formato gg-mm-yyyy che viene usata per tutti i documenti processati.
+    
+    REGOLA FERREA: Ritorna SEMPRE una struttura completa, anche in caso di errore.
     """
     try:
         from app.global_config import get_active_output_date
         date_str = get_active_output_date()
+        
+        # Garantisce che date_str sia sempre una stringa (anche se None)
+        if date_str is None:
+            logger.warning("get_active_output_date() ha ritornato None, uso fallback")
+            date_str = ""
+        
         return JSONResponse({
             "success": True,
             "output_date": date_str,
@@ -1296,7 +1368,15 @@ async def get_output_date(request: Request, auth: bool = Depends(check_auth)):
         })
     except Exception as e:
         logger.error(f"Errore lettura data output: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Errore durante la lettura: {str(e)}")
+        # REGOLA FERREA: In caso di errore, ritorna struttura completa con campo error
+        # NON sollevare HTTPException per non bloccare il frontend
+        return JSONResponse({
+            "success": False,
+            "output_date": "",
+            "format": "gg-mm-yyyy",
+            "error": "fallback",
+            "error_message": str(e)
+        })
 
 @app.post("/api/config/output-date")
 async def set_output_date(

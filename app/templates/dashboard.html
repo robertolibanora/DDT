@@ -185,7 +185,12 @@
         // Esponi refreshData globalmente per il modal
         window.refreshData = async function refreshData() {
             const indicator = document.getElementById('refresh-indicator');
-            indicator.classList.add('active');
+            const tbody = document.getElementById("table-body");
+            
+            // Mostra indicatore refresh
+            if (indicator) {
+                indicator.classList.add('active');
+            }
             
             try {
                 const res = await fetch("/data", {
@@ -198,17 +203,39 @@
                 
                 const data = await res.json();
                 
-                if (!data || !Array.isArray(data.rows)) {
-                    throw new Error('Formato dati non valido');
+                // REGOLA FERREA: Il backend garantisce sempre una struttura completa
+                // Non facciamo controlli tipo if (!data) return che bloccano la UX
+                // Normalizza data.rows a array vuoto se mancante o non valido
+                const rows = Array.isArray(data?.rows) ? data.rows : [];
+                
+                // Se c'è un errore nel backend ma ha ritornato struttura completa, logga ma continua
+                if (data?.error) {
+                    console.warn('Backend ha ritornato errore fallback:', data.error_message || data.error);
+                    // Non mostriamo errore se il backend ha gestito il fallback correttamente
+                    // Mostriamo solo se è un errore critico
                 }
                 
                 hideError();
-                renderTable(data.rows);
-                updateStats(data.rows);
+                renderTable(rows);
+                updateStats(rows);
                 updateLastUpdateTime();
                 
             } catch (error) {
                 console.error('Errore refresh dati:', error);
+                
+                // In caso di errore, mostra tabella vuota con messaggio
+                if (tbody) {
+                    tbody.innerHTML = `
+                        <tr>
+                            <td colspan="5" class="empty-state">
+                                Errore durante il caricamento dei dati. Riprova più tardi.
+                            </td>
+                        </tr>
+                    `;
+                }
+                
+                // Mostra statistiche a zero
+                updateStats([]);
                 
                 if (errorCount < MAX_ERRORS) {
                     showError(`Errore durante il caricamento: ${error.message}`);
@@ -216,7 +243,18 @@
                     showError('Errore persistente nel caricamento dati. Controlla la connessione.');
                 }
             } finally {
-                indicator.classList.remove('active');
+                // REGOLA FERREA: Rimuovi SEMPRE lo spinner iniziale e l'indicatore refresh
+                if (indicator) {
+                    indicator.classList.remove('active');
+                }
+                
+                // Rimuovi spinner iniziale se ancora presente (primo caricamento)
+                if (tbody) {
+                    const loadingRow = tbody.querySelector('.loading');
+                    if (loadingRow) {
+                        loadingRow.remove();
+                    }
+                }
             }
         }
 
@@ -513,7 +551,8 @@
         let currentOutputDate = null;
         
         /**
-         * Carica la data di output corrente dalla configurazione globale
+         * Carica la data di output corrente dalla configurazione globale.
+         * REGOLA FERREA: Non blocca mai la UX, anche in caso di errore.
          */
         async function loadOutputDate() {
             try {
@@ -521,20 +560,48 @@
                     credentials: 'include'
                 });
                 
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.success) {
-                        currentOutputDate = data.output_date;
-                        const dateEl = document.getElementById('current-output-date');
-                        if (dateEl) {
+                // REGOLA FERREA: Gestisci anche response non-ok con struttura completa
+                const data = await response.json();
+                
+                // Il backend garantisce sempre una struttura completa
+                // Usa data.output_date anche se success è false (fallback)
+                const outputDate = data?.output_date || "";
+                
+                if (outputDate) {
+                    currentOutputDate = outputDate;
+                    const dateEl = document.getElementById('current-output-date');
+                    if (dateEl) {
+                        try {
                             // Converti da gg-mm-yyyy a formato leggibile
-                            const [day, month, year] = currentOutputDate.split('-');
-                            dateEl.textContent = `${day}/${month}/${year}`;
+                            const [day, month, year] = outputDate.split('-');
+                            if (day && month && year) {
+                                dateEl.textContent = `${day}/${month}/${year}`;
+                            } else {
+                                dateEl.textContent = outputDate || '--';
+                            }
+                        } catch (e) {
+                            dateEl.textContent = outputDate || '--';
                         }
                     }
+                } else {
+                    // Se non c'è data, mostra placeholder
+                    const dateEl = document.getElementById('current-output-date');
+                    if (dateEl) {
+                        dateEl.textContent = '--';
+                    }
+                }
+                
+                // Log warning solo se c'è un errore reale (non fallback gestito)
+                if (data?.error && !response.ok) {
+                    console.warn('Errore caricamento data output (fallback gestito):', data.error_message || data.error);
                 }
             } catch (error) {
                 console.error('Errore caricamento data output:', error);
+                // REGOLA FERREA: Non bloccare la UX, mostra solo placeholder
+                const dateEl = document.getElementById('current-output-date');
+                if (dateEl) {
+                    dateEl.textContent = '--';
+                }
             }
         }
         
@@ -665,6 +732,7 @@
         /**
          * Aggiorna il banner dei documenti in attesa
          * Mostra il banner solo se ci sono documenti in attesa (QUEUED, PROCESSING, READY_FOR_REVIEW, STUCK)
+         * REGOLA FERREA: Non blocca mai la UX, anche in caso di errore.
          */
         async function updatePendingDocumentsBanner() {
             try {
@@ -672,34 +740,42 @@
                     credentials: 'include'
                 });
                 
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.success) {
-                        pendingDocumentsCount = data.count || 0;
-                        const banner = document.getElementById('pending-documents-banner');
-                        const countEl = document.getElementById('pending-count');
-                        const pluralEl = document.getElementById('pending-plural');
-                        
-                        if (banner && countEl && pluralEl) {
-                            if (pendingDocumentsCount > 0) {
-                                // Mostra banner
-                                countEl.textContent = pendingDocumentsCount;
-                                pluralEl.textContent = pendingDocumentsCount === 1 ? 'o' : 'i';
-                                banner.classList.remove('hidden');
-                            } else {
-                                // Nascondi banner
-                                banner.classList.add('hidden');
-                            }
-                        }
+                // REGOLA FERREA: Il backend garantisce sempre una struttura completa
+                const data = await response.json();
+                
+                // Normalizza count a 0 se mancante o non valido
+                pendingDocumentsCount = (data?.count !== undefined && data.count !== null) ? parseInt(data.count) || 0 : 0;
+                
+                const banner = document.getElementById('pending-documents-banner');
+                const countEl = document.getElementById('pending-count');
+                const pluralEl = document.getElementById('pending-plural');
+                
+                if (banner && countEl && pluralEl) {
+                    if (pendingDocumentsCount > 0) {
+                        // Mostra banner
+                        countEl.textContent = pendingDocumentsCount;
+                        pluralEl.textContent = pendingDocumentsCount === 1 ? 'o' : 'i';
+                        banner.classList.remove('hidden');
+                    } else {
+                        // Nascondi banner (stato normale: nessun documento in attesa)
+                        banner.classList.add('hidden');
                     }
+                }
+                
+                // Log warning solo se c'è un errore reale (non fallback gestito)
+                if (data?.error && !response.ok) {
+                    console.warn('Errore aggiornamento banner (fallback gestito):', data.error_message || data.error);
                 }
             } catch (error) {
                 console.error('Errore aggiornamento banner documenti in attesa:', error);
-                // In caso di errore, nascondi il banner per evitare confusione
+                // REGOLA FERREA: In caso di errore, nascondi il banner per evitare confusione
+                // Non bloccare la UX
                 const banner = document.getElementById('pending-documents-banner');
                 if (banner) {
                     banner.classList.add('hidden');
                 }
+                // Reset count a 0 per sicurezza
+                pendingDocumentsCount = 0;
             }
         }
         
@@ -721,65 +797,74 @@
                     credentials: 'include'
                 });
                 
-                if (response.ok) {
-                    const data = await response.json();
-                    const items = data.success && data.items ? data.items : [];
-                    const queueCount = items.length;
+                // REGOLA FERREA: Il backend garantisce sempre una struttura completa
+                const data = await response.json();
+                
+                // Normalizza items a array vuoto se mancante o non valido
+                const items = Array.isArray(data?.items) ? data.items : [];
+                const queueCount = items.length;
+                
+                // Aggiorna badge watchdog (solo se count > 0)
+                // PRINCIPIO: Eventi ignorati (documento già FINALIZED) → SILENZIO totale
+                updateWatchdogBadge(queueCount);
+                
+                // Se ci sono nuovi elementi, mostra toast notification discreta
+                // PRINCIPIO: Nessun modal automatico, solo notifica non invasiva
+                if (queueCount > 0 && queueCount > lastQueueCount) {
+                    const newItem = items.find(i => i.id !== lastProcessedQueueId) || items[0];
                     
-                    // Aggiorna badge watchdog (solo se count > 0)
-                    // PRINCIPIO: Eventi ignorati (documento già FINALIZED) → SILENZIO totale
-                    updateWatchdogBadge(queueCount);
-                    
-                    // Se ci sono nuovi elementi, mostra toast notification discreta
-                    // PRINCIPIO: Nessun modal automatico, solo notifica non invasiva
-                    if (queueCount > 0 && queueCount > lastQueueCount) {
-                        const newItem = items.find(i => i.id !== lastProcessedQueueId) || items[0];
+                    if (newItem && newItem.id !== lastProcessedQueueId) {
+                        lastProcessedQueueId = newItem.id;
                         
-                        if (newItem && newItem.id !== lastProcessedQueueId) {
-                            lastProcessedQueueId = newItem.id;
-                            
-                            // Toast notification discreta con azione opzionale
-                            showToast({
-                                type: 'info',
-                                message: `Nuovo documento rilevato: ${newItem.file_name || 'DDT'}`,
-                                action: 'Apri anteprima',
-                                    actionCallback: () => {
-                                    if (window.previewModal && newItem.extracted_data) {
-                                        window.previewModal.show(
-                                            newItem.extracted_data,
-                                            newItem.pdf_base64,
-                                            newItem.file_hash,
-                                            newItem.file_name,
-                                            newItem.extraction_mode || null,
-                                            newItem.suggest_create_layout || false,
-                                            newItem.has_layout_model !== undefined ? newItem.has_layout_model : null,
-                                            newItem.ai_fallback_used || false,
-                                            newItem.ai_fallback_fields || []
-                                        );
-                                    } else if (window.previewModal) {
-                                        // Mostra modal anche senza dati estratti (QUEUED/PROCESSING)
-                                        window.previewModal.show(
-                                            null, // extractedData
-                                            null, // pdfBase64
-                                            newItem.file_hash,
-                                            newItem.file_name,
-                                            null, // extractionMode
-                                            false, // suggestCreateLayout
-                                            null,  // hasLayoutModel
-                                            false, // aiFallbackUsed
-                                            []     // aiFallbackFields
-                                        );
-                                    }
-                                },
-                                duration: 8000
-                            });
-                        }
+                        // Toast notification discreta con azione opzionale
+                        showToast({
+                            type: 'info',
+                            message: `Nuovo documento rilevato: ${newItem.file_name || 'DDT'}`,
+                            action: 'Apri anteprima',
+                                actionCallback: () => {
+                                if (window.previewModal && newItem.extracted_data) {
+                                    window.previewModal.show(
+                                        newItem.extracted_data,
+                                        newItem.pdf_base64,
+                                        newItem.file_hash,
+                                        newItem.file_name,
+                                        newItem.extraction_mode || null,
+                                        newItem.suggest_create_layout || false,
+                                        newItem.has_layout_model !== undefined ? newItem.has_layout_model : null,
+                                        newItem.ai_fallback_used || false,
+                                        newItem.ai_fallback_fields || []
+                                    );
+                                } else if (window.previewModal) {
+                                    // Mostra modal anche senza dati estratti (QUEUED/PROCESSING)
+                                    window.previewModal.show(
+                                        null, // extractedData
+                                        null, // pdfBase64
+                                        newItem.file_hash,
+                                        newItem.file_name,
+                                        null, // extractionMode
+                                        false, // suggestCreateLayout
+                                        null,  // hasLayoutModel
+                                        false, // aiFallbackUsed
+                                        []     // aiFallbackFields
+                                    );
+                                }
+                            },
+                            duration: 8000
+                        });
                     }
-                    
-                    lastQueueCount = queueCount;
+                }
+                
+                lastQueueCount = queueCount;
+                
+                // Log warning solo se c'è un errore reale (non fallback gestito)
+                if (data?.error && !response.ok) {
+                    console.warn('Errore controllo coda watchdog (fallback gestito):', data.error_message || data.error);
                 }
             } catch (error) {
                 console.error('Errore controllo coda watchdog:', error);
+                // REGOLA FERREA: Non bloccare la UX, nascondi badge e reset count
+                updateWatchdogBadge(0);
+                lastQueueCount = 0;
             }
         }
 
@@ -816,6 +901,7 @@
         /**
          * Apre la coda watchdog manualmente quando l'utente clicca sul badge
          * PRINCIPIO: Nessun modal automatico, solo su richiesta utente
+         * REGOLA FERREA: Non blocca mai la UX, anche in caso di errore.
          */
         async function openWatchdogQueue() {
             if (!window.previewModal) {
@@ -832,12 +918,11 @@
                     credentials: 'include'
                 });
                 
-                if (!response.ok) {
-                    throw new Error('Errore caricamento coda');
-                }
-                
+                // REGOLA FERREA: Il backend garantisce sempre una struttura completa
                 const data = await response.json();
-                const items = data.success && data.items ? data.items : [];
+                
+                // Normalizza items a array vuoto se mancante o non valido
+                const items = Array.isArray(data?.items) ? data.items : [];
                 
                 if (items.length === 0) {
                     showToast({
@@ -863,6 +948,10 @@
                     item.ai_fallback_fields || []
                 );
                 
+                // Log warning solo se c'è un errore reale (non fallback gestito)
+                if (data?.error && !response.ok) {
+                    console.warn('Errore apertura coda watchdog (fallback gestito):', data.error_message || data.error);
+                }
             } catch (error) {
                 console.error('Errore apertura coda watchdog:', error);
                 showToast({
