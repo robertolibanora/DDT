@@ -1118,48 +1118,4 @@ async def delete_all_ddt(request: Request, auth: bool = Depends(check_auth)):
         raise HTTPException(status_code=500, detail=f"Errore durante la cancellazione: {str(e)}")
 
 if __name__ == "__main__":
-    import uvicorn
-    
-    # Log esplicito che siamo nel main
-    logger.info("="*60)
-    logger.info("🚀 [MAIN] Avvio applicazione FastAPI")
-    logger.info("="*60)
-    
-    # Usa 0.0.0.0 per permettere connessioni da tutte le interfacce di rete
-    # Questo permette l'accesso sia da localhost che dalla rete locale
-    host = "0.0.0.0"  # Ascolta su tutte le interfacce
-    port_str = os.getenv("UVICORN_PORT", "8000")
-    port = int(port_str)
-    local_ip = SERVER_IP  # Usa l'IP configurato
-    
-    # Log esplicito host/port PRIMA di uvicorn.run
-    logger.info(f"📍 [MAIN] Host: {host} (tutte le interfacce)")
-    logger.info(f"🌐 [MAIN] IP Configurato: {local_ip}")
-    logger.info(f"🔌 [MAIN] Porta: {port} (da UVICORN_PORT={port_str})")
-    logger.info(f"🔗 [MAIN] URL Locale: http://127.0.0.1:{port}")
-    logger.info(f"🔗 [MAIN] URL Rete: http://{local_ip}:{port}")
-    logger.info("="*60)
-    
-    # Stampa anche su stdout per systemd
-    print(f"\n🚀 [MAIN] Avvio server FastAPI su {host}:{port}", flush=True)
-    print(f"📍 [MAIN] Host: {host}, Port: {port}, IP: {local_ip}", flush=True)
-    
-    try:
-        # Avvia il server su tutte le interfacce (0.0.0.0)
-        logger.info(f"🚀 [MAIN] Chiamata uvicorn.run(app, host={host}, port={port})...")
-        uvicorn.run(app, host=host, port=port)
-        logger.info("✅ [MAIN] uvicorn.run completato normalmente")
-    except KeyboardInterrupt:
-        # Gestito anche da signal handler, ma per sicurezza
-        logger.critical("🛑 [MAIN] KeyboardInterrupt ricevuto")
-        print("🛑 [MAIN] KeyboardInterrupt ricevuto", flush=True)
-        try:
-            stop_cleanup_thread_safely()
-            stop_watchdog_safely()
-        except Exception as e:
-            logger.error(f"❌ [MAIN] Errore durante shutdown: {e}", exc_info=True)
-        os._exit(0)
-    except Exception as e:
-        logger.critical(f"❌ [MAIN] Errore fatale durante avvio server: {e}", exc_info=True)
-        print(f"❌ [MAIN] Errore fatale: {e}", flush=True)
-        os._exit(1)
+    print("Avvio tramite systemd + uvicorn CLI")
