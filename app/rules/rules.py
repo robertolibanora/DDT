@@ -37,22 +37,37 @@ def _load_rules() -> Dict[str, Any]:
             return _rules_cache
         
         if not RULES_FILE.exists():
-            logger.info(f"File regole non trovato, creo {RULES_FILE} vuoto")
+            logger.info("File regole non trovato, creo %s vuoto", str(RULES_FILE))
             _rules_cache = {}
-            _save_rules(_rules_cache)
+            try:
+                _save_rules(_rules_cache)
+            except Exception as e:
+                logger.warning("Errore salvataggio file regole vuoto: %s - continuo senza blocchi", str(e))
             return _rules_cache
         
         try:
             with open(RULES_FILE, 'r', encoding='utf-8') as f:
-                _rules_cache = json.load(f)
-            logger.info(f"Caricate {len(_rules_cache)} regole da {RULES_FILE}")
+                file_content = f.read()
+                if not file_content.strip():
+                    logger.warning("❌ [ANTI-CRASH] File regole è vuoto: %s - uso valori safe di default", str(RULES_FILE))
+                    _rules_cache = {}
+                    return _rules_cache
+                _rules_cache = json.loads(file_content)
+            
+            # Validazione struttura: assicura che sia un dict
+            if not isinstance(_rules_cache, dict):
+                logger.error("❌ [ANTI-CRASH] File regole non contiene un dict valido: %s - uso valori safe di default", str(RULES_FILE))
+                _rules_cache = {}
+                return _rules_cache
+            
+            logger.info("Caricate %d regole da %s", len(_rules_cache), str(RULES_FILE))
             return _rules_cache
         except json.JSONDecodeError as e:
-            logger.error(f"Errore parsing JSON regole: {e}")
+            logger.error("❌ [ANTI-CRASH] Errore parsing JSON regole: %s - uso valori safe di default", str(e))
             _rules_cache = {}
             return _rules_cache
         except Exception as e:
-            logger.error(f"Errore caricamento regole: {e}", exc_info=True)
+            logger.error("❌ [ANTI-CRASH] Errore caricamento regole: %s - uso valori safe di default", str(e), exc_info=True)
             _rules_cache = {}
             return _rules_cache
 

@@ -45,18 +45,32 @@ def _load_corrections() -> Dict[str, Any]:
     _ensure_corrections_dir()
     
     if not CORRECTIONS_FILE.exists():
-        logger.info(f"File correzioni non trovato, creo {CORRECTIONS_FILE} vuoto")
+        logger.info("File correzioni non trovato, creo %s vuoto", str(CORRECTIONS_FILE))
         _corrections_cache = {
             "corrections": {},
             "learning_patterns": {},
             "auto_rules_created": []  # Traccia le regole create automaticamente
         }
-        _save_corrections(_corrections_cache)
+        try:
+            _save_corrections(_corrections_cache)
+        except Exception as e:
+            logger.warning("Errore salvataggio file correzioni vuoto: %s - continuo senza blocchi", str(e))
         return _corrections_cache
     
     try:
         with open(CORRECTIONS_FILE, 'r', encoding='utf-8') as f:
-            _corrections_cache = json.load(f)
+            file_content = f.read()
+            if not file_content.strip():
+                logger.warning("❌ [ANTI-CRASH] File correzioni è vuoto: %s - uso valori safe di default", str(CORRECTIONS_FILE))
+                _corrections_cache = {"corrections": {}, "learning_patterns": {}, "auto_rules_created": []}
+                return _corrections_cache
+            _corrections_cache = json.loads(file_content)
+        
+        # Validazione struttura: assicura che sia un dict con chiavi corrette
+        if not isinstance(_corrections_cache, dict):
+            logger.error("❌ [ANTI-CRASH] File correzioni non contiene un dict valido: %s - uso valori safe di default", str(CORRECTIONS_FILE))
+            _corrections_cache = {"corrections": {}, "learning_patterns": {}, "auto_rules_created": []}
+            return _corrections_cache
         
         # Assicura che la struttura sia corretta
         if "corrections" not in _corrections_cache:
@@ -66,14 +80,14 @@ def _load_corrections() -> Dict[str, Any]:
         if "auto_rules_created" not in _corrections_cache:
             _corrections_cache["auto_rules_created"] = []
         
-        logger.info(f"Caricate {len(_corrections_cache.get('corrections', {}))} correzioni")
+        logger.info("Caricate %d correzioni", len(_corrections_cache.get('corrections', {})))
         return _corrections_cache
     except json.JSONDecodeError as e:
-        logger.error(f"Errore parsing JSON correzioni: {e}")
+        logger.error("❌ [ANTI-CRASH] Errore parsing JSON correzioni: %s - uso valori safe di default", str(e))
         _corrections_cache = {"corrections": {}, "learning_patterns": {}, "auto_rules_created": []}
         return _corrections_cache
     except Exception as e:
-        logger.error(f"Errore caricamento correzioni: {e}", exc_info=True)
+        logger.error("❌ [ANTI-CRASH] Errore caricamento correzioni: %s - uso valori safe di default", str(e), exc_info=True)
         _corrections_cache = {"corrections": {}, "learning_patterns": {}, "auto_rules_created": []}
         return _corrections_cache
 

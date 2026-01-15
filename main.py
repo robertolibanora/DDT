@@ -13,24 +13,96 @@ from starlette.middleware.sessions import SessionMiddleware
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
-from app.extract import extract_from_pdf, generate_preview_png
-from app.excel import append_to_excel, read_excel_as_dict, clear_all_ddt
-from app.config import INBOX_DIR, SERVER_IP, DDT_ROLE, IS_WEB_ROLE, IS_WORKER_ROLE
-from app.logging_config import setup_logging
-from app.routers import rules_router, reprocess_router, preview_router, layout_router, models_router
-from app.corrections import get_file_hash
-from app.auth import (
-    get_session_middleware,
-    is_authenticated,
-    require_auth,
-    login_user,
-    logout_user
-)
+# PROTEZIONE ANTI-CRASH: Import critici con fallback sicuro
+try:
+    from app.extract import extract_from_pdf, generate_preview_png
+except Exception as e:
+    print(f"❌ [CRITICAL] Errore import app.extract: {e}", file=sys.stderr)
+    # Fallback: definisce funzioni stub per evitare crash
+    def extract_from_pdf(*args, **kwargs):
+        raise RuntimeError("extract_from_pdf non disponibile - errore import")
+    def generate_preview_png(*args, **kwargs):
+        raise RuntimeError("generate_preview_png non disponibile - errore import")
+
+try:
+    from app.excel import append_to_excel, read_excel_as_dict, clear_all_ddt
+except Exception as e:
+    print(f"❌ [CRITICAL] Errore import app.excel: {e}", file=sys.stderr)
+    def append_to_excel(*args, **kwargs):
+        raise RuntimeError("append_to_excel non disponibile - errore import")
+    def read_excel_as_dict(*args, **kwargs):
+        raise RuntimeError("read_excel_as_dict non disponibile - errore import")
+    def clear_all_ddt(*args, **kwargs):
+        raise RuntimeError("clear_all_ddt non disponibile - errore import")
+
+try:
+    from app.config import INBOX_DIR, SERVER_IP, DDT_ROLE, IS_WEB_ROLE, IS_WORKER_ROLE
+except Exception as e:
+    print(f"❌ [CRITICAL] Errore import app.config: {e}", file=sys.stderr)
+    # Fallback valori safe
+    INBOX_DIR = "/tmp/ddt_inbox"
+    SERVER_IP = "127.0.0.1"
+    DDT_ROLE = "web"
+    IS_WEB_ROLE = True
+    IS_WORKER_ROLE = False
+
+try:
+    from app.logging_config import setup_logging
+    setup_logging()
+except Exception as e:
+    print(f"❌ [CRITICAL] Errore setup logging: {e}", file=sys.stderr)
+    # Fallback: logging base
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
+try:
+    from app.routers import rules_router, reprocess_router, preview_router, layout_router, models_router
+except Exception as e:
+    print(f"❌ [CRITICAL] Errore import routers: {e}", file=sys.stderr)
+    # Fallback: routers vuoti
+    rules_router = None
+    reprocess_router = None
+    preview_router = None
+    layout_router = None
+    models_router = None
+
+try:
+    from app.corrections import get_file_hash
+except Exception as e:
+    print(f"❌ [CRITICAL] Errore import app.corrections: {e}", file=sys.stderr)
+    import hashlib
+    def get_file_hash(file_path):
+        """Fallback hash usando hashlib"""
+        try:
+            with open(file_path, 'rb') as f:
+                return hashlib.sha256(f.read()).hexdigest()
+        except Exception:
+            return "unknown"
+
+try:
+    from app.auth import (
+        get_session_middleware,
+        is_authenticated,
+        require_auth,
+        login_user,
+        logout_user
+    )
+except Exception as e:
+    print(f"❌ [CRITICAL] Errore import app.auth: {e}", file=sys.stderr)
+    # Fallback: auth disabilitato
+    def get_session_middleware():
+        return None
+    def is_authenticated(request):
+        return True  # Fallback: autenticazione disabilitata
+    def require_auth(func):
+        return func
+    def login_user(*args, **kwargs):
+        return None
+    def logout_user(*args, **kwargs):
+        return None
+
 from fastapi import FastAPI
 from typing import Optional
 
-# Configura logging
-setup_logging()
 logger = logging.getLogger(__name__)
 
 # Variabili globali per gestione shutdown (tutti i thread/task avviati)
@@ -413,61 +485,89 @@ async def lifespan(app: FastAPI):
     
     # Sposta operazioni lunghe in thread daemon (NON bloccanti)
     # SOLO per ruoli web: task leggeri (migrazione, layout models, cleanup coda)
+    # PROTEZIONE ANTI-CRASH: Ogni task è isolato e non blocca lo startup
     def init_background_tasks():
-        """Inizializza task in background (migrazione, layout models, cleanup coda)"""
-        role_label = "[WEB]" if IS_WEB_ROLE else "[WORKER]"
-        logger.info(f"{role_label} [BACKGROUND_TASKS] Avvio task iniziali in background...")
+        """Inizializza task in background (migrazione, layout models, cleanup coda)
         
+        PROTEZIONE ANTI-CRASH:
+        - Ogni task è isolato in try/except
+        - Se un task fallisce, gli altri continuano
+        - Il server si avvia comunque anche se alcuni task falliscono
+        """
+        role_label = "[WEB]" if IS_WEB_ROLE else "[WORKER]"
+        logger.info("%s [BACKGROUND_TASKS] Avvio task iniziali in background...", role_label)
+        
+        # Task 1: Migrazione stati (isolato)
         try:
-            # Migra documenti READY (deprecato) a READY_FOR_REVIEW per backward compatibility
-            logger.info(f"{role_label} [BACKGROUND_TASKS] Avvio migrazione stati...")
+            logger.info("%s [BACKGROUND_TASKS] Avvio migrazione stati...", role_label)
             from app.processed_documents import migrate_ready_to_ready_for_review
             migrated_count = migrate_ready_to_ready_for_review()
             if migrated_count > 0:
-                logger.info(f"{role_label} [BACKGROUND_TASKS] Migrazione stati completata: {migrated_count} documento(i) migrato(i)")
+                logger.info("%s [BACKGROUND_TASKS] Migrazione stati completata: %d documento(i) migrato(i)", role_label, migrated_count)
             else:
-                logger.info(f"{role_label} [BACKGROUND_TASKS] Migrazione stati: nessun documento da migrare")
+                logger.info("%s [BACKGROUND_TASKS] Migrazione stati: nessun documento da migrare", role_label)
+        except SyntaxError as e:
+            logger.error("%s [BACKGROUND_TASKS] ❌ [CRITICAL] SyntaxError in migrazione stati: %s - sistema operativo in modalità degradata", role_label, str(e))
+        except ImportError as e:
+            logger.error("%s [BACKGROUND_TASKS] ❌ [CRITICAL] ImportError in migrazione stati: %s - sistema operativo in modalità degradata", role_label, str(e))
         except Exception as e:
-            logger.error(f"{role_label} [BACKGROUND_TASKS] Errore migrazione stati: {e}", exc_info=True)
+            logger.error("%s [BACKGROUND_TASKS] Errore migrazione stati: %s", role_label, str(e), exc_info=True)
         
+        # Task 2: Caricamento layout models (isolato)
         try:
-            # Carica layout models all'avvio per loggare disponibilità
-            logger.info(f"{role_label} [BACKGROUND_TASKS] Avvio caricamento layout models...")
+            logger.info("%s [BACKGROUND_TASKS] Avvio caricamento layout models...", role_label)
             from app.layout_rules.manager import load_layout_rules
             rules = load_layout_rules()
             if rules:
-                logger.info(f"{role_label} [BACKGROUND_TASKS] Layout models disponibili: {len(rules)} modello(i)")
+                logger.info("%s [BACKGROUND_TASKS] Layout models disponibili: %d modello(i)", role_label, len(rules))
                 # Log per mittente
-                from app.layout_rules.manager import normalize_sender
-                sender_counts = {}
-                for rule_name, rule in rules.items():
-                    supplier = rule.match.supplier
-                    sender_norm = normalize_sender(supplier)
-                    sender_counts[sender_norm] = sender_counts.get(sender_norm, 0) + 1
-                for sender_norm, count in sender_counts.items():
-                    logger.info(f"   📦 {role_label} [BACKGROUND_TASKS] Loaded {count} layout model(s) for sender: {sender_norm}")
+                try:
+                    from app.layout_rules.manager import normalize_sender
+                    sender_counts = {}
+                    for rule_name, rule in rules.items():
+                        try:
+                            supplier = rule.match.supplier
+                            sender_norm = normalize_sender(supplier)
+                            sender_counts[sender_norm] = sender_counts.get(sender_norm, 0) + 1
+                        except Exception as e:
+                            logger.warning("%s [BACKGROUND_TASKS] Errore processing regola %s: %s", role_label, rule_name, str(e))
+                            continue
+                    for sender_norm, count in sender_counts.items():
+                        logger.info("   📦 %s [BACKGROUND_TASKS] Loaded %d layout model(s) for sender: %s", role_label, count, sender_norm)
+                except Exception as e:
+                    logger.warning("%s [BACKGROUND_TASKS] Errore logging mittenti: %s", role_label, str(e))
             else:
-                logger.warning(f"{role_label} [BACKGROUND_TASKS] ⚠️ Nessun layout model disponibile - sistema operativo ma userà AI fallback")
-                logger.info(f"{role_label} [HEARTBEAT] Sistema operativo – nessun documento in elaborazione – 0 layout models")
+                logger.warning("%s [BACKGROUND_TASKS] ⚠️ Nessun layout model disponibile - sistema operativo ma userà AI fallback", role_label)
+                logger.info("%s [HEARTBEAT] Sistema operativo – nessun documento in elaborazione – 0 layout models", role_label)
+        except SyntaxError as e:
+            logger.error("%s [BACKGROUND_TASKS] ❌ [CRITICAL] SyntaxError in caricamento layout models: %s - sistema operativo in modalità degradata", role_label, str(e))
+            logger.info("%s [HEARTBEAT] Sistema operativo – nessun documento in elaborazione – errore caricamento layout models (SyntaxError)", role_label)
+        except ImportError as e:
+            logger.error("%s [BACKGROUND_TASKS] ❌ [CRITICAL] ImportError in caricamento layout models: %s - sistema operativo in modalità degradata", role_label, str(e))
+            logger.info("%s [HEARTBEAT] Sistema operativo – nessun documento in elaborazione – errore caricamento layout models (ImportError)", role_label)
         except Exception as e:
-            logger.error(f"{role_label} [BACKGROUND_TASKS] Errore caricamento layout models: {e}", exc_info=True)
-            logger.info(f"{role_label} [HEARTBEAT] Sistema operativo – nessun documento in elaborazione – errore caricamento layout models")
+            logger.error("%s [BACKGROUND_TASKS] Errore caricamento layout models: %s", role_label, str(e), exc_info=True)
+            logger.info("%s [HEARTBEAT] Sistema operativo – nessun documento in elaborazione – errore caricamento layout models", role_label)
         
+        # Task 3: Carica e pulisci coda watchdog (isolato)
         try:
-            # Carica e pulisci coda watchdog (in background)
-            logger.info(f"{role_label} [BACKGROUND_TASKS] Avvio caricamento e pulizia coda watchdog...")
+            logger.info("%s [BACKGROUND_TASKS] Avvio caricamento e pulizia coda watchdog...", role_label)
             from app.watchdog_queue import _load_queue, cleanup_old_items
             _load_queue()
             removed_count = cleanup_old_items()
             if removed_count > 0:
-                logger.info(f"{role_label} [BACKGROUND_TASKS] Pulizia coda watchdog: {removed_count} elemento(i) rimosso(i)")
+                logger.info("%s [BACKGROUND_TASKS] Pulizia coda watchdog: %d elemento(i) rimosso(i)", role_label, removed_count)
             else:
-                logger.info(f"{role_label} [BACKGROUND_TASKS] Pulizia coda watchdog: nessun elemento da rimuovere")
+                logger.info("%s [BACKGROUND_TASKS] Pulizia coda watchdog: nessun elemento da rimuovere", role_label)
+        except SyntaxError as e:
+            logger.error("%s [BACKGROUND_TASKS] ❌ [CRITICAL] SyntaxError in watchdog queue: %s - sistema operativo in modalità degradata", role_label, str(e))
+        except ImportError as e:
+            logger.error("%s [BACKGROUND_TASKS] ❌ [CRITICAL] ImportError in watchdog queue: %s - sistema operativo in modalità degradata", role_label, str(e))
         except Exception as e:
-            logger.error(f"{role_label} [BACKGROUND_TASKS] Errore caricamento/pulizia coda watchdog: {e}", exc_info=True)
+            logger.error("%s [BACKGROUND_TASKS] Errore caricamento/pulizia coda watchdog: %s", role_label, str(e), exc_info=True)
         
-        logger.info(f"{role_label} [BACKGROUND_TASKS] Tutti i task iniziali completati")
-        logger.info(f"{role_label} [HEARTBEAT] Sistema operativo – nessun documento in elaborazione – stato idle")
+        logger.info("%s [BACKGROUND_TASKS] Tutti i task iniziali completati", role_label)
+        logger.info("%s [HEARTBEAT] Sistema operativo – nessun documento in elaborazione – stato idle", role_label)
     
     # Avvia task iniziali in thread daemon (NON bloccante)
     # SOLO task leggeri (migrazione, layout models, cleanup coda) - NO watchdog/processing/cleanup STUCK
@@ -851,11 +951,71 @@ async def models_page(request: Request):
     return templates.TemplateResponse("models.html", {"request": request})
 
 # Include i router per regole, reprocessing e anteprima (dopo le route HTML per evitare conflitti)
-app.include_router(rules_router.router)
-app.include_router(reprocess_router.router)
-app.include_router(preview_router.router)
-app.include_router(layout_router.router)
-app.include_router(models_router.router)
+# PROTEZIONE ANTI-CRASH: Montaggio router isolato - se un router fallisce, gli altri continuano
+try:
+    if rules_router:
+        app.include_router(rules_router.router)
+        logger.info("✅ Router 'rules' montato correttamente")
+    else:
+        logger.warning("⚠️ Router 'rules' non disponibile - skip montaggio")
+except SyntaxError as e:
+    logger.error("❌ [CRITICAL] SyntaxError in rules_router: %s - router non montato, sistema operativo in modalità degradata", str(e))
+except ImportError as e:
+    logger.error("❌ [CRITICAL] ImportError in rules_router: %s - router non montato, sistema operativo in modalità degradata", str(e))
+except Exception as e:
+    logger.error("❌ Errore montaggio router 'rules': %s", str(e), exc_info=True)
+
+try:
+    if reprocess_router:
+        app.include_router(reprocess_router.router)
+        logger.info("✅ Router 'reprocess' montato correttamente")
+    else:
+        logger.warning("⚠️ Router 'reprocess' non disponibile - skip montaggio")
+except SyntaxError as e:
+    logger.error("❌ [CRITICAL] SyntaxError in reprocess_router: %s - router non montato, sistema operativo in modalità degradata", str(e))
+except ImportError as e:
+    logger.error("❌ [CRITICAL] ImportError in reprocess_router: %s - router non montato, sistema operativo in modalità degradata", str(e))
+except Exception as e:
+    logger.error("❌ Errore montaggio router 'reprocess': %s", str(e), exc_info=True)
+
+try:
+    if preview_router:
+        app.include_router(preview_router.router)
+        logger.info("✅ Router 'preview' montato correttamente")
+    else:
+        logger.warning("⚠️ Router 'preview' non disponibile - skip montaggio")
+except SyntaxError as e:
+    logger.error("❌ [CRITICAL] SyntaxError in preview_router: %s - router non montato, sistema operativo in modalità degradata", str(e))
+except ImportError as e:
+    logger.error("❌ [CRITICAL] ImportError in preview_router: %s - router non montato, sistema operativo in modalità degradata", str(e))
+except Exception as e:
+    logger.error("❌ Errore montaggio router 'preview': %s", str(e), exc_info=True)
+
+try:
+    if layout_router:
+        app.include_router(layout_router.router)
+        logger.info("✅ Router 'layout' montato correttamente")
+    else:
+        logger.warning("⚠️ Router 'layout' non disponibile - skip montaggio")
+except SyntaxError as e:
+    logger.error("❌ [CRITICAL] SyntaxError in layout_router: %s - router non montato, sistema operativo in modalità degradata", str(e))
+except ImportError as e:
+    logger.error("❌ [CRITICAL] ImportError in layout_router: %s - router non montato, sistema operativo in modalità degradata", str(e))
+except Exception as e:
+    logger.error("❌ Errore montaggio router 'layout': %s", str(e), exc_info=True)
+
+try:
+    if models_router:
+        app.include_router(models_router.router)
+        logger.info("✅ Router 'models' montato correttamente")
+    else:
+        logger.warning("⚠️ Router 'models' non disponibile - skip montaggio")
+except SyntaxError as e:
+    logger.error("❌ [CRITICAL] SyntaxError in models_router: %s - router non montato, sistema operativo in modalità degradata", str(e))
+except ImportError as e:
+    logger.error("❌ [CRITICAL] ImportError in models_router: %s - router non montato, sistema operativo in modalità degradata", str(e))
+except Exception as e:
+    logger.error("❌ Errore montaggio router 'models': %s", str(e), exc_info=True)
 
 @app.get("/data")
 async def get_data(request: Request, auth: bool = Depends(check_auth)):
