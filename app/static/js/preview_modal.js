@@ -392,6 +392,9 @@ class PreviewModal {
         this.currentFileName = fileName;
         this.currentModel = null;
 
+        // Verifica se extractedData è disponibile (potrebbe essere undefined per QUEUED/PROCESSING)
+        const hasExtractedData = extractedData && typeof extractedData === 'object';
+
         // Reset tutti gli stati di riconoscimento modello
         const statusEl = document.getElementById('model-detection-status');
         const detectedEl = document.getElementById('model-detected');
@@ -484,17 +487,19 @@ class PreviewModal {
         
         if (fileHashEl) fileHashEl.value = fileHash || '';
         if (fileNameEl) fileNameEl.value = fileName || '';
-        if (originalDataEl) originalDataEl.value = JSON.stringify(extractedData);
+        if (originalDataEl) originalDataEl.value = hasExtractedData ? JSON.stringify(extractedData) : '';
         
-        // Aggiorna link layout trainer
+        // Aggiorna link layout trainer (solo se abbiamo dati estratti)
         const layoutTrainerLink = document.getElementById('layout-trainer-link');
-        if (layoutTrainerLink && fileHash) {
+        if (layoutTrainerLink && fileHash && hasExtractedData) {
             const supplier = extractedData?.mittente || '';
             const url = `/layout-trainer?hash=${fileHash}${supplier ? '&supplier=' + encodeURIComponent(supplier) : ''}`;
             layoutTrainerLink.href = url;
+        } else if (layoutTrainerLink) {
+            layoutTrainerLink.href = '#';
         }
 
-        // Popola i campi
+        // Popola i campi (solo se abbiamo dati estratti)
         const dataEl = document.getElementById('preview-data');
         const dataInserimentoEl = document.getElementById('preview-data-inserimento');
         const mittenteEl = document.getElementById('preview-mittente');
@@ -502,64 +507,159 @@ class PreviewModal {
         const numeroEl = document.getElementById('preview-numero-documento');
         const kgEl = document.getElementById('preview-totale-kg');
         
-        if (dataEl) dataEl.value = extractedData.data || '';
-        
-        // Imposta data_inserimento: default a oggi, ma controlla se già salvata
-        if (dataInserimentoEl) {
-            // Prova a recuperare data_inserimento salvata (se documento già visto)
-            // Per ora usa sempre data odierna come default
-            const today = new Date();
-            const todayStr = today.toISOString().split('T')[0]; // YYYY-MM-DD
-            dataInserimentoEl.value = todayStr;
-        }
-        
-        if (mittenteEl) mittenteEl.value = extractedData.mittente || '';
-        if (destinatarioEl) destinatarioEl.value = extractedData.destinatario || '';
-        if (numeroEl) numeroEl.value = extractedData.numero_documento || '';
-        if (kgEl) {
-            const kgValue = parseFloat(extractedData.totale_kg) || 0;
-            kgEl.value = kgValue.toFixed(3);
-        }
-
-        // Rileva modello automaticamente basato sul mittente estratto
-        const mittente = extractedData?.mittente || '';
-        if (mittente) {
-            this.detectModel(mittente);
+        if (hasExtractedData) {
+            // Popola i campi con i dati estratti
+            if (dataEl) dataEl.value = extractedData.data || '';
+            
+            // Imposta data_inserimento: default a oggi, ma controlla se già salvata
+            if (dataInserimentoEl) {
+                // Prova a recuperare data_inserimento salvata (se documento già visto)
+                // Per ora usa sempre data odierna come default
+                const today = new Date();
+                const todayStr = today.toISOString().split('T')[0]; // YYYY-MM-DD
+                dataInserimentoEl.value = todayStr;
+            }
+            
+            if (mittenteEl) mittenteEl.value = extractedData.mittente || '';
+            if (destinatarioEl) destinatarioEl.value = extractedData.destinatario || '';
+            if (numeroEl) numeroEl.value = extractedData.numero_documento || '';
+            if (kgEl) {
+                const kgValue = parseFloat(extractedData.totale_kg) || 0;
+                kgEl.value = kgValue.toFixed(3);
+            }
+            
+            // Disabilita i campi se non abbiamo dati estratti
+            const formFields = [dataEl, mittenteEl, destinatarioEl, numeroEl, kgEl];
+            formFields.forEach(field => {
+                if (field) field.disabled = false;
+            });
+            
+            // Rileva modello automaticamente basato sul mittente estratto
+            const mittente = extractedData?.mittente || '';
+            if (mittente) {
+                this.detectModel(mittente);
+            } else {
+                // Se non c'è mittente, mostra solo selezione manuale
+                const statusEl = document.getElementById('model-detection-status');
+                const selectionEl = document.getElementById('model-selection');
+                if (statusEl) statusEl.classList.add('hidden');
+                if (selectionEl) selectionEl.classList.remove('hidden');
+            }
         } else {
-            // Se non c'è mittente, mostra solo selezione manuale
+            // Nessun dato estratto disponibile (QUEUED/PROCESSING)
+            // Pulisci i campi e disabilitali
+            if (dataEl) {
+                dataEl.value = '';
+                dataEl.disabled = true;
+            }
+            if (dataInserimentoEl) {
+                const today = new Date();
+                const todayStr = today.toISOString().split('T')[0];
+                dataInserimentoEl.value = todayStr;
+                dataInserimentoEl.disabled = true;
+            }
+            if (mittenteEl) {
+                mittenteEl.value = '';
+                mittenteEl.disabled = true;
+            }
+            if (destinatarioEl) {
+                destinatarioEl.value = '';
+                destinatarioEl.disabled = true;
+            }
+            if (numeroEl) {
+                numeroEl.value = '';
+                numeroEl.disabled = true;
+            }
+            if (kgEl) {
+                kgEl.value = '';
+                kgEl.disabled = true;
+            }
+            
+            // Nascondi riconoscimento modello
             const statusEl = document.getElementById('model-detection-status');
+            const detectedEl = document.getElementById('model-detected');
             const selectionEl = document.getElementById('model-selection');
             if (statusEl) statusEl.classList.add('hidden');
-            if (selectionEl) selectionEl.classList.remove('hidden');
+            if (detectedEl) detectedEl.classList.add('hidden');
+            if (selectionEl) selectionEl.classList.add('hidden');
         }
 
-        // Mostra/nascondi banner suggerimento layout model
+        // Mostra/nascondi banner suggerimento layout model (solo se abbiamo dati estratti)
         // Il banner appare SOLO se:
         // - has_layout_model === false (più esplicito, preferito)
         // - OPPURE extraction_mode == AI_FALLBACK (suggestCreateLayout == true, backward compatibility)
         // NON appare per LAYOUT_MODEL o HYBRID_LAYOUT_AI (has_layout_model === true)
         const suggestBanner = document.getElementById('suggest-layout-banner');
         if (suggestBanner) {
-            // Determina se mostrare il banner:
-            // - Se hasLayoutModel è definito, usa quello (false = mostra banner)
-            // - Altrimenti fallback a suggestCreateLayout (true = mostra banner)
-            const shouldShowBanner = hasLayoutModel !== null 
-                ? (hasLayoutModel === false) 
-                : (suggestCreateLayout === true);
-            
-            if (shouldShowBanner) {
-                suggestBanner.classList.remove('hidden');
-                // Setup CTA button
-                const createLayoutBtn = document.getElementById('create-layout-btn');
-                if (createLayoutBtn) {
-                    createLayoutBtn.onclick = () => {
-                        const supplier = extractedData?.mittente || '';
-                        const url = `/layout-trainer?hash=${fileHash}${supplier ? '&supplier=' + encodeURIComponent(supplier) : ''}`;
-                        window.location.href = url;
-                    };
+            if (hasExtractedData) {
+                // Determina se mostrare il banner:
+                // - Se hasLayoutModel è definito, usa quello (false = mostra banner)
+                // - Altrimenti fallback a suggestCreateLayout (true = mostra banner)
+                const shouldShowBanner = hasLayoutModel !== null 
+                    ? (hasLayoutModel === false) 
+                    : (suggestCreateLayout === true);
+                
+                if (shouldShowBanner) {
+                    suggestBanner.classList.remove('hidden');
+                    // Setup CTA button
+                    const createLayoutBtn = document.getElementById('create-layout-btn');
+                    if (createLayoutBtn) {
+                        createLayoutBtn.onclick = () => {
+                            const supplier = extractedData?.mittente || '';
+                            const url = `/layout-trainer?hash=${fileHash}${supplier ? '&supplier=' + encodeURIComponent(supplier) : ''}`;
+                            window.location.href = url;
+                        };
+                    }
+                } else {
+                    suggestBanner.classList.add('hidden');
                 }
             } else {
+                // Nessun dato estratto, nascondi banner
                 suggestBanner.classList.add('hidden');
+            }
+        }
+
+        // Mostra messaggio di stato se non abbiamo dati estratti
+        const formSection = document.querySelector('.preview-form-section');
+        if (formSection) {
+            // Rimuovi eventuali messaggi di stato precedenti
+            const existingStatusMsg = formSection.querySelector('.processing-status-message');
+            if (existingStatusMsg) {
+                existingStatusMsg.remove();
+            }
+            
+            if (!hasExtractedData) {
+                // Crea messaggio di stato
+                const statusMsg = document.createElement('div');
+                statusMsg.className = 'processing-status-message';
+                statusMsg.innerHTML = `
+                    <div class="processing-status-content">
+                        <div class="processing-status-icon">⏳</div>
+                        <div class="processing-status-text">
+                            <div class="processing-status-title">Documento in elaborazione</div>
+                            <div class="processing-status-subtitle">Il documento è stato caricato e sarà processato dal worker. L'anteprima sarà disponibile a breve.</div>
+                        </div>
+                    </div>
+                `;
+                // Inserisci prima del form
+                const form = formSection.querySelector('#preview-form');
+                if (form) {
+                    formSection.insertBefore(statusMsg, form);
+                }
+                
+                // Disabilita il pulsante di conferma
+                const confirmBtn = document.getElementById('preview-confirm-btn');
+                if (confirmBtn) {
+                    confirmBtn.disabled = true;
+                    confirmBtn.textContent = '⏳ In attesa di elaborazione...';
+                }
+            } else {
+                // Abilita il pulsante di conferma
+                const confirmBtn = document.getElementById('preview-confirm-btn');
+                if (confirmBtn) {
+                    confirmBtn.disabled = false;
+                    confirmBtn.textContent = '✅ Conferma e Salva';
+                }
             }
         }
 

@@ -476,7 +476,7 @@
                                 message: `Nuovo documento rilevato: ${newItem.file_name || 'DDT'}`,
                                 action: 'Apri anteprima',
                                     actionCallback: () => {
-                                    if (window.previewModal) {
+                                    if (window.previewModal && newItem.extracted_data) {
                                         window.previewModal.show(
                                             newItem.extracted_data,
                                             newItem.pdf_base64,
@@ -485,6 +485,17 @@
                                             newItem.extraction_mode || null,
                                             newItem.suggest_create_layout || false,
                                             newItem.has_layout_model !== undefined ? newItem.has_layout_model : null
+                                        );
+                                    } else if (window.previewModal) {
+                                        // Mostra modal anche senza dati estratti (QUEUED/PROCESSING)
+                                        window.previewModal.show(
+                                            null, // extractedData
+                                            null, // pdfBase64
+                                            newItem.file_hash,
+                                            newItem.file_name,
+                                            null, // extractionMode
+                                            false, // suggestCreateLayout
+                                            null  // hasLayoutModel
                                         );
                                     }
                                 },
@@ -567,9 +578,10 @@
                 
                 // Mostra il primo documento della coda
                 const item = items[0];
+                // Gestisce il caso in cui extracted_data non è disponibile (QUEUED/PROCESSING)
                 window.previewModal.show(
-                    item.extracted_data,
-                    item.pdf_base64,
+                    item.extracted_data || null, // Gestisce undefined/null
+                    item.pdf_base64 || null,
                     item.file_hash,
                     item.file_name,
                     item.extraction_mode || null,

@@ -200,6 +200,35 @@
                     console.log('Dati validi, verifico modal...');
                     console.log('window.previewModal:', window.previewModal);
                     
+                    // Verifica se il documento è in stato QUEUED (nessun extracted_data)
+                    if (data.status === 'QUEUED' || !data.extracted_data) {
+                        // Documento in coda per elaborazione
+                        showMessage('✅ File caricato con successo. Il documento è in coda per l\'elaborazione. L\'anteprima sarà disponibile a breve.', 'success');
+                        
+                        // Reset form
+                        form.reset();
+                        fileInfo.classList.add('hidden');
+                        
+                        // Opzionalmente, mostra il modal con stato QUEUED
+                        await ensureModalReady();
+                        if (window.previewModal && typeof window.previewModal.show === 'function') {
+                            try {
+                                window.previewModal.show(
+                                    null, // extractedData = null per QUEUED
+                                    null, // pdfBase64 = null (non ancora disponibile)
+                                    data.file_hash,
+                                    data.file_name,
+                                    null, // extractionMode
+                                    false, // suggestCreateLayout
+                                    null  // hasLayoutModel
+                                );
+                            } catch (modalError) {
+                                console.error('Errore durante show modal QUEUED:', modalError);
+                            }
+                        }
+                        return;
+                    }
+                    
                     // Assicurati che il modal sia pronto
                     await ensureModalReady();
                     
@@ -216,8 +245,8 @@
                         
                         try {
                             window.previewModal.show(
-                                data.extracted_data,
-                                data.pdf_base64,
+                                data.extracted_data || null, // Gestisce undefined/null
+                                data.pdf_base64 || null,
                                 data.file_hash,
                                 data.file_name,
                                 data.extraction_mode || null,
