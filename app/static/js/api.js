@@ -32,33 +32,42 @@ async function apiFetch(url, options = {}) {
         const response = await fetch(url, fetchOptions);
         
         // Gestione speciale per 401 (sessione scaduta)
+        // IMPORTANTE: NON fare redirect se siamo già sulla pagina di login
+        // (evita loop infinito quando il login stesso restituisce 401)
         if (response.status === 401) {
-            // Mostra messaggio all'utente
-            const errorMessage = 'Sessione scaduta. Effettua nuovamente il login.';
+            // Escludi /login dal redirect automatico per evitare loop infiniti
+            const isLoginPage = url.includes('/login') || window.location.pathname === '/login';
             
-            // Cerca di mostrare il messaggio nella pagina corrente
-            const errorContainer = document.getElementById('error-message') || 
-                                 document.querySelector('.error-message') ||
-                                 document.body;
-            
-            if (errorContainer) {
-                const errorDiv = document.createElement('div');
-                errorDiv.className = 'error-message';
-                errorDiv.style.cssText = 'background-color: #f44336; color: white; padding: 15px; margin: 10px; border-radius: 4px; text-align: center;';
-                errorDiv.textContent = errorMessage;
-                errorContainer.insertBefore(errorDiv, errorContainer.firstChild);
+            if (!isLoginPage) {
+                // Mostra messaggio all'utente
+                const errorMessage = 'Sessione scaduta. Effettua nuovamente il login.';
                 
-                // Reindirizza al login dopo 2 secondi
-                setTimeout(() => {
+                // Cerca di mostrare il messaggio nella pagina corrente
+                const errorContainer = document.getElementById('error-message') || 
+                                     document.querySelector('.error-message') ||
+                                     document.body;
+                
+                if (errorContainer) {
+                    const errorDiv = document.createElement('div');
+                    errorDiv.className = 'error-message';
+                    errorDiv.style.cssText = 'background-color: #f44336; color: white; padding: 15px; margin: 10px; border-radius: 4px; text-align: center;';
+                    errorDiv.textContent = errorMessage;
+                    errorContainer.insertBefore(errorDiv, errorContainer.firstChild);
+                    
+                    // Reindirizza al login dopo 2 secondi
+                    setTimeout(() => {
+                        window.location.href = '/login';
+                    }, 2000);
+                } else {
+                    // Fallback: reindirizza immediatamente
                     window.location.href = '/login';
-                }, 2000);
-            } else {
-                // Fallback: reindirizza immediatamente
-                window.location.href = '/login';
+                }
+                
+                // Solleva errore per interrompere l'esecuzione
+                throw new Error(errorMessage);
             }
-            
-            // Solleva errore per interrompere l'esecuzione
-            throw new Error(errorMessage);
+            // Se siamo su /login, lascia che il codice chiamante gestisca l'errore 401
+            // (non fare redirect per evitare loop)
         }
         
         return response;

@@ -20,7 +20,7 @@
                     name="file" 
                     accept="application/pdf"
                     required
-                    style="position: absolute; opacity: 0; width: 100%; height: 100%; cursor: pointer;"
+                    style="display: none;"
                 >
                 <div class="upload-dropzone-icon">📄</div>
                 <div class="upload-dropzone-text">Trascina qui il documento DDT</div>
@@ -99,18 +99,35 @@
 
         const dropzone = document.getElementById('dropzone');
         
-        // Gestione drag & drop
+        // FIX 1: Limita il click solo al dropzone visibile (non fuori dal riquadro)
+        // Il click sul dropzone apre il file picker
+        dropzone.addEventListener('click', (e) => {
+            // Assicura che il click sia solo sul dropzone stesso, non su elementi figli che potrebbero avere eventi separati
+            if (e.target === dropzone || e.target.closest('.upload-dropzone-icon') || 
+                e.target.closest('.upload-dropzone-text') || e.target.closest('.upload-dropzone-hint')) {
+                fileInput.click();
+            }
+        });
+        
+        // Gestione drag & drop (solo dentro il dropzone)
         dropzone.addEventListener('dragover', (e) => {
             e.preventDefault();
+            e.stopPropagation();
             dropzone.classList.add('drag-over');
         });
         
-        dropzone.addEventListener('dragleave', () => {
-            dropzone.classList.remove('drag-over');
+        dropzone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            // Verifica che il dragleave sia effettivamente fuori dal dropzone
+            if (!dropzone.contains(e.relatedTarget)) {
+                dropzone.classList.remove('drag-over');
+            }
         });
         
         dropzone.addEventListener('drop', (e) => {
             e.preventDefault();
+            e.stopPropagation();
             dropzone.classList.remove('drag-over');
             
             const files = e.dataTransfer.files;

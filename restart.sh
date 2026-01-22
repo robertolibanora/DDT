@@ -1,31 +1,94 @@
 #!/bin/bash
-set -e
+set -Eeuo pipefail
 
-echo "🛑 Stop servizi (force)"
-sudo systemctl stop ddt-web || true
-sudo systemctl stop ddt-worker || true
+# ==============================
+# CONFIG
+# ==============================
+APP_DIR="/var/www/DDT"
+SERVICES=("ddt-web" "ddt-worker")
+WAIT_STOP=5
+WAIT_START=2
 
-sleep 3
+# ==============================
+# UTILS
+# ==============================
+log() {
+  echo -e "\n🔹 $1"
+}
 
-echo "🧨 Kill residui python/uvicorn"
-sudo pkill -9 -f "uvicorn main:app" || true
-sudo pkill -9 -f "worker.py" || true
+warn() {
+  echo -e "⚠️  $1"
+}
 
-sleep 2
+die() {
+  echo -e "❌ $1"
+  exit 1
+}
 
-echo "🧹 Pulizia pycache"
-sudo find /var/www/DDT -type d -name "__pycache__" -exec rm -rf {} +
+# ==============================
+# PRECHECK
+# ==============================
+if [[ $EUID -ne 0 ]]; then
+  die "Esegui lo script come root (sudo ./restart_ddt.sh)"
+fi
 
-echo "🚀 Start worker"
-sudo systemctl start ddt-worker
-sleep 2
+cd "$APP_DIR" || die "Directory $APP_DIR non trovata"
 
-echo "🌐 Start web"
-sudo systemctl start ddt-web
-sleep 2
+log "Avvio restart controllato DDT"
 
-echo "📊 Stato servizi"
-systemctl status ddt-worker --no-pager
-systemctl status ddt-web --no-pager
+# ==============================
+# STOP SERVIZI (GRACEFUL)
+# ==============================
+log "Stop servizi (graceful)"
+for svc in "${SERVICES[@]}"; do
+  systemctl stop "$svc" || warn "Impossibile stoppare $svc"
+done
 
-echo "✅ Restart completato"
+sleep "$WAIT_STOP"
+
+# ==============================
+# VERIFICA PROCESSI RESIDUI
+# ==============================
+log "Verifica processi residui"
+
+PIDS=$(pgrep -f "uvicorn main:app|worker.py" || true)
+
+if [[ -n "$PIDS" ]]; then
+  warn "Processi ancora attivi: $PIDS"
+  warn "Tentativo SIGTERM"
+  kill $PIDS || true
+  sleep 2
+fi
+
+PIDS=$(pgrep -f "uvicorn main:app|worker.py" || true)
+
+if [[ -n "$PIDS" ]]; then
+  warn "SIGTERM fallito → SIGKILL"
+  kill -9 $PIDS || true
+fi
+
+# ==============================
+# CLEANUP
+# ==============================
+log "Pulizia __pycache__"
+find "$APP_DIR" -type d -name "__pycache__" -prune -exec rm -rf {} +
+
+# ==============================
+# START SERVIZI (ORDINATO)
+# ==============================
+log "Start WORKER"
+systemctl start ddt-worker
+sleep "$WAIT_START"
+
+log "Start WEB"
+systemctl start ddt-web
+sleep "$WAIT_START"
+
+# ==============================
+# HEALTH CHECK
+# ==============================
+log "Verifica stato servizi"
+systemctl --no-pager status ddt-worker
+systemctl --no-pager status ddt-web
+
+log "Restart completato con successo"

@@ -570,7 +570,7 @@
                 }
                 
                 // Log warning solo se c'è un errore reale (non fallback gestito)
-                if (data?.error && !response.ok) {
+                if (data?.error) {
                     console.warn('Errore caricamento data output (fallback gestito):', data.error_message || data.error);
                 }
             } catch (error) {
