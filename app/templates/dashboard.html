@@ -29,6 +29,16 @@
 
 {% block messages %}
     <div id="error-message" class="message error hidden"></div>
+    <!-- Banner backend down -->
+    <div id="backend-down-banner" class="backend-down-banner hidden">
+        <div class="backend-down-content">
+            <div class="backend-down-icon">⚠️</div>
+            <div class="backend-down-text">
+                <div class="backend-down-title">Connessione al server non disponibile</div>
+                <div class="backend-down-subtitle">Riprovo automaticamente...</div>
+            </div>
+        </div>
+    </div>
     <!-- Banner documenti in attesa -->
     <div id="pending-documents-banner" class="pending-documents-banner hidden">
         <div class="pending-banner-content">
@@ -53,8 +63,13 @@
                 <div class="output-date-text">
                     <div class="output-date-label">Cartella di destinazione attiva</div>
                     <div class="output-date-value">
-                        Data: <span id="current-output-date">--</span>
-                        <span class="output-date-status">(attiva)</span>
+                        Cartella di destinazione: <span id="current-output-date">--</span>
+                        <span class="output-date-status" id="output-date-status">(attiva)</span>
+                        <span id="output-date-saving" class="output-date-saving hidden">
+                            <span class="spinner-small"></span> Salvataggio...
+                        </span>
+                        <span id="output-date-saved" class="output-date-saved hidden">✅ Salvato</span>
+                        <span id="output-date-error" class="output-date-error hidden"></span>
                     </div>
                 </div>
             </div>
@@ -75,8 +90,10 @@
                         ⚠️ <strong>Attenzione:</strong> La data che imposti verrà usata per <strong>TUTTI</strong> i documenti processati da questo momento in poi.
                     </p>
                     <div class="form-group">
-                        <label for="output-date-input">Data cartella (gg-mm-yyyy)</label>
-                        <input type="date" id="output-date-input" required>
+                        <label for="output-date-input">Cartella di destinazione (YYYY-MM-DD)</label>
+                        <div class="output-date-input-wrapper">
+                            <input type="date" id="output-date-input" required>
+                        </div>
                         <small class="form-help">Tutti i documenti verranno salvati nella cartella con questa data</small>
                     </div>
                 </div>
@@ -126,9 +143,69 @@
 
 {% block scripts %}
     <script>
-        let refreshInterval;
+        // Gestione loader centralizzata con counter
+        let loaderCounter = 0;
+        let pollingActive = false;
+        let pollingAbortController = null;
+        let isPageVisible = true;
+        
         let errorCount = 0;
         const MAX_ERRORS = 3;
+        
+        // Funzione helper per gestire loader
+        function setLoaderActive(active) {
+            const indicator = document.getElementById('refresh-indicator');
+            if (!indicator) return;
+            
+            if (active) {
+                loaderCounter++;
+                indicator.classList.add('active');
+            } else {
+                loaderCounter = Math.max(0, loaderCounter - 1);
+                if (loaderCounter === 0) {
+                    indicator.classList.remove('active');
+                }
+            }
+        }
+        
+        // Gestione banner backend down
+        let backendDownBannerVisible = false;
+        
+        function showBackendDownBanner() {
+            if (backendDownBannerVisible) return;
+            const banner = document.getElementById('backend-down-banner');
+            if (banner) {
+                banner.classList.remove('hidden');
+                backendDownBannerVisible = true;
+            }
+        }
+        
+        function hideBackendDownBanner() {
+            if (!backendDownBannerVisible) return;
+            const banner = document.getElementById('backend-down-banner');
+            if (banner) {
+                banner.classList.add('hidden');
+                backendDownBannerVisible = false;
+            }
+        }
+        
+        // Error handler globali per rimuovere loader in caso di errori JS non gestiti
+        window.addEventListener('error', (event) => {
+            console.error('Errore JS non gestito:', event.error);
+            loaderCounter = 0;
+            setLoaderActive(false);
+        });
+        
+        window.addEventListener('unhandledrejection', (event) => {
+            console.error('Promise rejection non gestita:', event.reason);
+            loaderCounter = 0;
+            setLoaderActive(false);
+            
+            // Se è network error, mostra banner
+            if (event.reason && event.reason.isNetworkError) {
+                showBackendDownBanner();
+            }
+        });
 
         function showError(message) {
             const errorDiv = document.getElementById('error-message');
@@ -184,16 +261,13 @@
 
         // Esponi refreshData globalmente per il modal
         window.refreshData = async function refreshData() {
-            const indicator = document.getElementById('refresh-indicator');
             const tbody = document.getElementById("table-body");
-            
-            // Mostra indicatore refresh
-            if (indicator) {
-                indicator.classList.add('active');
-            }
             
             try {
                 const data = await apiGet("/data");
+                
+                // Backend risponde → nascondi banner
+                hideBackendDownBanner();
                 
                 // REGOLA FERREA: Il backend garantisce sempre una struttura completa
                 // Non facciamo controlli tipo if (!data) return che bloccano la UX
@@ -213,7 +287,12 @@
                 updateLastUpdateTime();
                 
             } catch (error) {
-                console.error('Errore refresh dati:', error);
+                // Se è network error, mostra banner backend down
+                if (error.isNetworkError) {
+                    showBackendDownBanner();
+                } else {
+                    console.error('Errore refresh dati:', error);
+                }
                 
                 // In caso di errore, mostra tabella vuota con messaggio
                 if (tbody) {
@@ -229,17 +308,14 @@
                 // Mostra statistiche a zero
                 updateStats([]);
                 
-                if (errorCount < MAX_ERRORS) {
-                    showError(`Errore durante il caricamento: ${error.message}`);
-                } else {
-                    showError('Errore persistente nel caricamento dati. Controlla la connessione.');
+                if (!error.isNetworkError) {
+                    if (errorCount < MAX_ERRORS) {
+                        showError(`Errore durante il caricamento: ${error.message}`);
+                    } else {
+                        showError('Errore persistente nel caricamento dati. Controlla la connessione.');
+                    }
                 }
             } finally {
-                // REGOLA FERREA: Rimuovi SEMPRE lo spinner iniziale e l'indicatore refresh
-                if (indicator) {
-                    indicator.classList.remove('active');
-                }
-                
                 // Rimuovi spinner iniziale se ancora presente (primo caricamento)
                 if (tbody) {
                     const loadingRow = tbody.querySelector('.loading');
@@ -493,8 +569,15 @@
             return div.innerHTML;
         }
 
-        // Funzione per svuotare tutti i DDT
+        // Funzione per svuotare tutti i DDT con prevenzione doppi submit
         async function clearAllDDT() {
+            const clearBtn = document.getElementById('clear-all-btn');
+            
+            // Prevenzione doppi submit: se già in loading, ignora
+            if (clearBtn && (clearBtn.disabled || clearBtn.dataset.loading === 'true')) {
+                return;
+            }
+            
             // Conferma prima di cancellare
             const confirmed = confirm('⚠️ ATTENZIONE!\n\nStai per cancellare TUTTI i DDT dal database.\nQuesta operazione non può essere annullata.\n\nSei sicuro di voler continuare?');
             
@@ -502,11 +585,11 @@
                 return;
             }
             
-            const clearBtn = document.getElementById('clear-all-btn');
             const originalText = clearBtn.textContent;
             
             try {
                 clearBtn.disabled = true;
+                clearBtn.dataset.loading = 'true';
                 clearBtn.textContent = '⏳ Cancellazione...';
                 
                 const data = await apiPost('/data/clear');
@@ -519,10 +602,14 @@
                 await refreshData();
                 
             } catch (error) {
-                console.error('Errore cancellazione:', error);
+                // Log solo se non è network error
+                if (!error.isNetworkError) {
+                    console.error('Errore cancellazione:', error);
+                }
                 showError(`Errore: ${error.message}`);
             } finally {
                 clearBtn.disabled = false;
+                clearBtn.dataset.loading = 'false';
                 clearBtn.textContent = originalText;
             }
         }
@@ -574,6 +661,10 @@
                     console.warn('Errore caricamento data output (fallback gestito):', data.error_message || data.error);
                 }
             } catch (error) {
+                // Se 401, utente non autenticato, non fare nulla
+                if (error.message && error.message.includes('Sessione scaduta')) {
+                    return;
+                }
                 console.error('Errore caricamento data output:', error);
                 // REGOLA FERREA: Non bloccare la UX, mostra solo placeholder
                 const dateEl = document.getElementById('current-output-date');
@@ -606,18 +697,49 @@
          */
         function hideOutputDateModal() {
             const modal = document.getElementById('output-date-modal');
+            const input = document.getElementById('output-date-input');
+            const savingEl = document.getElementById('output-date-saving');
+            const savedEl = document.getElementById('output-date-saved');
+            const errorEl = document.getElementById('output-date-error');
+            const statusEl = document.getElementById('output-date-status');
+            const saveBtn = document.getElementById('save-output-date-btn');
+            
             if (modal) {
                 modal.classList.add('hidden');
             }
+            
+            // Reset stati quando si chiude il modal
+            if (input) input.disabled = false;
+            if (saveBtn) {
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Salva';
+            }
+            if (savingEl) savingEl.classList.add('hidden');
+            if (savedEl) savedEl.classList.add('hidden');
+            if (errorEl) errorEl.classList.add('hidden');
+            if (statusEl) statusEl.classList.remove('hidden');
         }
         
         /**
-         * Salva nuova data output
+         * Salva nuova data output con feedback visivo migliorato e prevenzione doppi submit
          */
         async function saveOutputDate() {
+            const saveBtn = document.getElementById('save-output-date-btn');
+            
+            // Prevenzione doppi submit: se già in loading, ignora
+            if (saveBtn && (saveBtn.disabled || saveBtn.dataset.loading === 'true')) {
+                return;
+            }
+            
             const input = document.getElementById('output-date-input');
             if (!input || !input.value) {
-                alert('⚠️ Seleziona una data');
+                // Mostra errore inline invece di alert
+                const errorEl = document.getElementById('output-date-error');
+                if (errorEl) {
+                    errorEl.textContent = '⚠️ Seleziona una data';
+                    errorEl.classList.remove('hidden');
+                    setTimeout(() => errorEl.classList.add('hidden'), 3000);
+                }
                 return;
             }
             
@@ -626,46 +748,84 @@
             const [year, month, day] = isoDate.split('-');
             const dateStr = `${day}-${month}-${year}`;
             
-            const saveBtn = document.getElementById('save-output-date-btn');
-            const originalText = saveBtn?.textContent || 'Salva';
+            const inputWrapper = input.closest('.output-date-input-wrapper');
+            const savingEl = document.getElementById('output-date-saving');
+            const savedEl = document.getElementById('output-date-saved');
+            const errorEl = document.getElementById('output-date-error');
+            const statusEl = document.getElementById('output-date-status');
+            
+            // Reset stati precedenti
+            if (savedEl) savedEl.classList.add('hidden');
+            if (errorEl) errorEl.classList.add('hidden');
+            
+            // Disabilita input e mostra spinner (prevenzione doppi submit)
+            input.disabled = true;
+            if (saveBtn) {
+                saveBtn.disabled = true;
+                saveBtn.dataset.loading = 'true';
+                saveBtn.textContent = 'Salvataggio...';
+            }
+            if (savingEl) savingEl.classList.remove('hidden');
+            if (statusEl) statusEl.classList.add('hidden');
             
             try {
-                if (saveBtn) {
-                    saveBtn.disabled = true;
-                    saveBtn.textContent = 'Salvataggio...';
-                }
-                
-                const formData = new FormData();
-                formData.append('output_date', dateStr);
-                
-                const data = await apiPostForm('/api/config/output-date', formData);
+                // Usa PUT con JSON invece di POST con FormData
+                const data = await apiPut('/api/config/output-date', { output_date: dateStr });
                 
                 if (data.success) {
                     // Aggiorna visualizzazione
                     currentOutputDate = dateStr;
                     await loadOutputDate();
                     
-                    // Mostra messaggio di successo
-                    if (typeof showToast === 'function') {
-                        showToast({
-                            type: 'success',
-                            message: `✅ Data cartella aggiornata: ${day}/${month}/${year}`,
-                            duration: 3000
-                        });
+                    // Nascondi spinner, mostra badge "Salvato"
+                    if (savingEl) savingEl.classList.add('hidden');
+                    if (savedEl) {
+                        savedEl.classList.remove('hidden');
+                        // Rimuovi badge dopo 3 secondi
+                        setTimeout(() => {
+                            savedEl.classList.add('hidden');
+                            if (statusEl) statusEl.classList.remove('hidden');
+                        }, 3000);
                     }
                     
-                    hideOutputDateModal();
+                    // Riabilita input
+                    input.disabled = false;
+                    if (saveBtn) {
+                        saveBtn.disabled = false;
+                        saveBtn.dataset.loading = 'false';
+                        saveBtn.textContent = 'Salva';
+                    }
+                    
+                    // Chiudi modal dopo breve delay per mostrare feedback
+                    setTimeout(() => {
+                        hideOutputDateModal();
+                    }, 1500);
                 } else {
                     throw new Error(data.detail || 'Errore durante il salvataggio');
                 }
             } catch (error) {
-                console.error('Errore salvataggio data output:', error);
-                alert(`❌ Errore: ${error.message}`);
-            } finally {
+                // Log solo se non è network error
+                if (!error.isNetworkError) {
+                    console.error('Errore salvataggio data output:', error);
+                }
+                
+                // Nascondi spinner
+                if (savingEl) savingEl.classList.add('hidden');
+                
+                // Mostra errore inline (NON alert)
+                if (errorEl) {
+                    errorEl.textContent = `❌ ${error.message}`;
+                    errorEl.classList.remove('hidden');
+                }
+                
+                // Riabilita input
+                input.disabled = false;
                 if (saveBtn) {
                     saveBtn.disabled = false;
-                    saveBtn.textContent = originalText;
+                    saveBtn.dataset.loading = 'false';
+                    saveBtn.textContent = 'Salva';
                 }
+                if (statusEl) statusEl.classList.remove('hidden');
             }
         }
         
@@ -685,16 +845,24 @@
             }
         });
         
-        // Carica data output all'avvio
-        loadOutputDate();
+        // Carica data output solo dopo DOMContentLoaded e api.js caricato
+        document.addEventListener('DOMContentLoaded', () => {
+            loadOutputDate();
+        });
 
-        // Ottimizzazione: usa Intersection Observer per refresh solo quando visibile
-        let isPageVisible = true;
+        // Gestione visibilità pagina per sospendere polling
         document.addEventListener('visibilitychange', () => {
+            const wasVisible = isPageVisible;
             isPageVisible = !document.hidden;
-            if (isPageVisible) {
-                // Ricarica immediatamente quando la pagina diventa visibile
-                refreshData();
+            
+            if (!wasVisible && isPageVisible) {
+                // Pagina torna visibile: riparti polling con refresh immediato
+                console.log('Pagina visibile, riavvio polling...');
+                startPolling();
+            } else if (wasVisible && !isPageVisible) {
+                // Pagina nascosta: sospendi polling
+                console.log('Pagina nascosta, sospendo polling...');
+                stopPolling();
             }
         });
 
@@ -710,6 +878,9 @@
             try {
                 // REGOLA FERREA: Il backend garantisce sempre una struttura completa
                 const data = await apiGet('/api/pending-documents-count');
+                
+                // Backend risponde → nascondi banner
+                hideBackendDownBanner();
                 
                 // Normalizza count a 0 se mancante o non valido
                 pendingDocumentsCount = (data?.count !== undefined && data.count !== null) ? parseInt(data.count) || 0 : 0;
@@ -731,11 +902,16 @@
                 }
                 
                 // Log warning solo se c'è un errore reale (non fallback gestito)
-                if (data?.error && !response.ok) {
+                if (data?.error) {
                     console.warn('Errore aggiornamento banner (fallback gestito):', data.error_message || data.error);
                 }
             } catch (error) {
-                console.error('Errore aggiornamento banner documenti in attesa:', error);
+                // Se è network error, mostra banner backend down (non logga)
+                if (error.isNetworkError) {
+                    showBackendDownBanner();
+                } else {
+                    console.error('Errore aggiornamento banner documenti in attesa:', error);
+                }
                 // REGOLA FERREA: In caso di errore, nascondi il banner per evitare confusione
                 // Non bloccare la UX
                 const banner = document.getElementById('pending-documents-banner');
@@ -763,6 +939,9 @@
             try {
                 // REGOLA FERREA: Il backend garantisce sempre una struttura completa
                 const data = await apiGet('/api/watchdog-queue');
+                
+                // Backend risponde → nascondi banner
+                hideBackendDownBanner();
                 
                 // Normalizza items a array vuoto se mancante o non valido
                 const items = Array.isArray(data?.items) ? data.items : [];
@@ -821,11 +1000,16 @@
                 lastQueueCount = queueCount;
                 
                 // Log warning solo se c'è un errore reale (non fallback gestito)
-                if (data?.error && !response.ok) {
+                if (data?.error) {
                     console.warn('Errore controllo coda watchdog (fallback gestito):', data.error_message || data.error);
                 }
             } catch (error) {
-                console.error('Errore controllo coda watchdog:', error);
+                // Se è network error, mostra banner backend down
+                if (error.isNetworkError) {
+                    showBackendDownBanner();
+                } else {
+                    console.error('Errore controllo coda watchdog:', error);
+                }
                 // REGOLA FERREA: Non bloccare la UX, nascondi badge e reset count
                 updateWatchdogBadge(0);
                 lastQueueCount = 0;
@@ -1009,25 +1193,137 @@
             });
         }
 
-        // Avvia il refresh automatico ogni 3 secondi (solo se la pagina è visibile)
-        refreshInterval = setInterval(() => {
-            if (isPageVisible) {
-                refreshData();
-                checkWatchdogQueue(); // Controlla anche la coda watchdog
-                updatePendingDocumentsBanner(); // Aggiorna banner documenti in attesa
+        // Funzione helper per sleep
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+        
+        /**
+         * Checklist go-live automatica
+         */
+        async function runGoLiveChecks() {
+            const checks = {
+                apiJsLoaded: typeof apiGet !== 'undefined',
+                apiGetDefined: typeof apiGet === 'function',
+                healthcheckOk: false,
+                pollingActive: pollingActive,
+                loaderOff: loaderCounter === 0
+            };
+            
+            // Verifica healthcheck
+            try {
+                const healthData = await apiGet('/api/health');
+                checks.healthcheckOk = healthData.status === 'ok';
+            } catch (error) {
+                checks.healthcheckOk = false;
             }
-        }, 3000);
+            
+            // Log risultati
+            const allOk = Object.values(checks).every(v => v === true);
+            
+            if (!allOk) {
+                console.warn('[GO-LIVE CHECK] Alcuni controlli falliti:', checks);
+                
+                // Banner non bloccante se healthcheck fallisce
+                if (!checks.healthcheckOk) {
+                    showBackendDownBanner();
+                }
+            } else {
+                console.log('[GO-LIVE CHECK] Tutti i controlli OK');
+            }
+            
+            return checks;
+        }
         
-        // Carica immediatamente
-        refreshData();
-        checkWatchdogQueue();
-        updatePendingDocumentsBanner(); // Controlla documenti in attesa all'avvio
+        // Esegui checklist dopo caricamento completo
+        if (document.readyState === 'complete') {
+            setTimeout(runGoLiveChecks, 2000);
+        } else {
+            window.addEventListener('load', () => {
+                setTimeout(runGoLiveChecks, 2000);
+            });
+        }
         
-        // Pulisci l'intervallo quando la pagina viene chiusa
+        // Funzione per eseguire tutte le chiamate API in sequenza
+        async function refreshAll() {
+            if (!isPageVisible) return;
+            
+            // Set loader ON all'inizio del ciclo
+            setLoaderActive(true);
+            
+            try {
+                // Esegui chiamate IN SEQUENZA (una alla volta)
+                await refreshData();
+                await checkWatchdogQueue();
+                await updatePendingDocumentsBanner();
+            } catch (error) {
+                // Errori già gestiti nelle singole funzioni, log qui per sicurezza
+                console.error('Errore durante refreshAll:', error);
+            } finally {
+                // Set loader OFF sempre alla fine
+                setLoaderActive(false);
+            }
+        }
+        
+        // Loop async sequenziale per polling intelligente
+        async function pollingLoop() {
+            while (pollingActive && isPageVisible) {
+                try {
+                    await refreshAll();
+                    // Attendi 5 secondi prima del prossimo ciclo
+                    await sleep(5000);
+                } catch (error) {
+                    // Errore nel loop stesso (non nelle fetch)
+                    console.error('Errore nel polling loop:', error);
+                    setLoaderActive(false);
+                    // Attendi prima di riprovare
+                    await sleep(5000);
+                }
+            }
+        }
+        
+        // Avvia polling
+        function startPolling() {
+            if (pollingActive) return;
+            
+            pollingActive = true;
+            pollingAbortController = new AbortController();
+            pollingLoop().catch(error => {
+                console.error('Errore fatale nel polling loop:', error);
+                setLoaderActive(false);
+            });
+        }
+        
+        // Ferma polling
+        function stopPolling() {
+            pollingActive = false;
+            if (pollingAbortController) {
+                pollingAbortController.abort();
+                pollingAbortController = null;
+            }
+            setLoaderActive(false);
+        }
+        
+        // Pulisci polling quando la pagina viene chiusa
         window.addEventListener('beforeunload', () => {
-            if (refreshInterval) {
-                clearInterval(refreshInterval);
-            }
+            stopPolling();
+        });
+        
+        // Carica inizialmente solo dopo che il DOM è pronto e api.js è caricato
+        document.addEventListener('DOMContentLoaded', () => {
+            // Carica output date una sola volta all'avvio
+            loadOutputDate();
+            
+            // Refresh iniziale
+            refreshAll().then(() => {
+                // Avvia polling dopo il primo refresh
+                startPolling();
+            }).catch(error => {
+                console.error('Errore refresh iniziale:', error);
+                setLoaderActive(false);
+                // Avvia comunque il polling
+                startPolling();
+            });
         });
     </script>
 {% endblock %}

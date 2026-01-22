@@ -99,14 +99,28 @@
 
         const dropzone = document.getElementById('dropzone');
         
-        // FIX 1: Limita il click solo al dropzone visibile (non fuori dal riquadro)
-        // Il click sul dropzone apre il file picker
+        // FIX: Limita il click SOLO al riquadro upload (non fuori)
+        // Event delegation: click listener solo sul dropzone, stopPropagation su elementi interni
         dropzone.addEventListener('click', (e) => {
-            // Assicura che il click sia solo sul dropzone stesso, non su elementi figli che potrebbero avere eventi separati
-            if (e.target === dropzone || e.target.closest('.upload-dropzone-icon') || 
-                e.target.closest('.upload-dropzone-text') || e.target.closest('.upload-dropzone-hint')) {
+            // Verifica che il click sia DENTRO il riquadro dropzone
+            // e.target === dropzone significa click diretto sul container
+            // e.target.closest('.upload-dropzone-*') significa click su elementi interni del riquadro
+            const isInsideDropzone = e.target === dropzone || 
+                                    dropzone.contains(e.target);
+            
+            if (isInsideDropzone) {
+                // Click dentro il riquadro → apri file picker
+                e.stopPropagation(); // Previeni propagazione fuori
                 fileInput.click();
             }
+        });
+        
+        // Previeni click su elementi interni che potrebbero propagare fuori
+        const dropzoneChildren = dropzone.querySelectorAll('.upload-dropzone-icon, .upload-dropzone-text, .upload-dropzone-hint');
+        dropzoneChildren.forEach(child => {
+            child.addEventListener('click', (e) => {
+                e.stopPropagation(); // Previeni propagazione al parent
+            });
         });
         
         // Gestione drag & drop (solo dentro il dropzone)
@@ -196,14 +210,20 @@
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             
+            // Prevenzione doppi submit: se già in loading, ignora
+            if (submitBtn.disabled || submitBtn.dataset.loading === 'true') {
+                return;
+            }
+            
             const file = fileInput.files[0];
             if (!file) {
                 showMessage('Seleziona un file prima di caricare', 'error');
                 return;
             }
 
-            // Mostra stato di caricamento
+            // Mostra stato di caricamento (prevenzione doppi submit)
             submitBtn.disabled = true;
+            submitBtn.dataset.loading = 'true';
             btnText.textContent = 'Elaborazione in corso...';
             btnSpinner.classList.remove('hidden');
             hideMessage();
@@ -309,11 +329,15 @@
                 }
 
             } catch (error) {
-                console.error('Errore upload:', error);
-                console.error('Stack:', error.stack);
+                // Log solo se non è network error
+                if (!error.isNetworkError) {
+                    console.error('Errore upload:', error);
+                    console.error('Stack:', error.stack);
+                }
                 showMessage(`Errore: ${error.message}`, 'error');
             } finally {
                 submitBtn.disabled = false;
+                submitBtn.dataset.loading = 'false';
                 btnText.textContent = 'Estrai e Anteprima';
                 btnSpinner.classList.add('hidden');
             }

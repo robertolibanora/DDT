@@ -420,6 +420,52 @@ td:last-child {
 }
 
 /* Banner documenti in attesa */
+/* Banner backend down */
+.backend-down-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 10000;
+    background: linear-gradient(135deg, #ff6b6b 0%, #ee5a6f 100%);
+    color: white;
+    padding: var(--spacing-md);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    animation: slideDown 0.3s ease-out;
+}
+
+.backend-down-content {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.backend-down-icon {
+    font-size: 1.5em;
+    flex-shrink: 0;
+}
+
+.backend-down-text {
+    flex: 1;
+}
+
+.backend-down-title {
+    font-weight: 600;
+    font-size: 1em;
+    margin-bottom: 2px;
+}
+
+.backend-down-subtitle {
+    font-size: 0.875em;
+    opacity: 0.95;
+}
+
+.backend-down-banner.hidden {
+    display: none;
+}
+
 .pending-documents-banner {
     margin: var(--spacing-lg) var(--spacing-lg) var(--spacing-md) var(--spacing-lg);
     padding: 0;
@@ -688,6 +734,10 @@ td:last-child {
     font-size: 1.1em;
     color: var(--oceano-profondo);
     font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 
 .output-date-value #current-output-date {
@@ -700,7 +750,38 @@ td:last-child {
     font-size: 0.85em;
     color: var(--oceano-medio);
     font-weight: 400;
-    margin-left: 8px;
+}
+
+.output-date-saving {
+    font-size: 0.85em;
+    color: var(--oceano-medio);
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.output-date-saved {
+    font-size: 0.85em;
+    color: var(--successo);
+    font-weight: 600;
+    display: inline-block;
+    animation: fadeIn 0.3s ease-out;
+}
+
+.output-date-error {
+    font-size: 0.85em;
+    color: var(--corallo);
+    font-weight: 600;
+    display: inline-block;
+    animation: fadeIn 0.3s ease-out;
+}
+
+.output-date-input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 .btn-edit-output-date {

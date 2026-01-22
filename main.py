@@ -494,6 +494,13 @@ def start_watcher_background(observer: Observer):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Inizializzazione all'avvio
+    try:
+        from app.global_config import ensure_config_file
+        ensure_config_file()
+    except Exception as e:
+        logger.error(f"Errore inizializzazione configurazione globale: {e}", exc_info=True)
+    
     """
     Lifespan FastAPI - gestisce startup e shutdown.
     
@@ -691,10 +698,49 @@ async def shutdown_event():
 @app.get("/health", include_in_schema=False)
 def health():
     """
-    Endpoint health check - verifica che il server risponda.
-    NON controlla dipendenze (veloce, < 1ms).
+    Endpoint health check tecnico - verifica accesso file critici.
+    Ritorno immediato (<100ms), MAI solleva eccezioni.
     """
-    return {"status": "ok", "service": "ddt-web"}
+    from datetime import datetime
+    import os
+    
+    checks = {
+        "config": False,
+        "processed_documents": False
+    }
+    
+    # Check global_config.json (lettura)
+    try:
+        from app.paths import get_app_dir
+        config_file = get_app_dir() / "global_config.json"
+        if config_file.exists() and os.access(config_file, os.R_OK):
+            checks["config"] = True
+    except Exception:
+        pass  # Ignora errori, checks["config"] rimane False
+    
+    # Check processed_documents.json (lettura)
+    try:
+        from app.paths import get_processed_documents_file
+        processed_file = get_processed_documents_file()
+        if processed_file.exists() and os.access(processed_file, os.R_OK):
+            checks["processed_documents"] = True
+    except Exception:
+        pass  # Ignora errori, checks["processed_documents"] rimane False
+    
+    # Determina status
+    all_ok = all(checks.values())
+    status = "ok" if all_ok else "degraded"
+    
+    # Log solo se degradato
+    if status != "ok":
+        logger.warning(f"[HEALTH] Status degraded (PID={os.getpid()}): checks={checks}")
+    
+    # MAI sollevare eccezioni, sempre HTTP 200
+    return JSONResponse({
+        "status": status,
+        "time": datetime.now().isoformat(),
+        "checks": checks
+    })
 
 
 @app.get("/ready", include_in_schema=False)
@@ -1454,17 +1500,20 @@ async def set_output_date(
     auth: bool = Depends(check_auth)
 ):
     """
-    Endpoint per impostare la data attiva per la cartella di output.
+    Endpoint POST per impostare la data attiva per la cartella di output (FormData).
     
     Questa data viene usata per TUTTI i documenti processati da questo momento in poi.
+    
+    REGOLA: Scrittura esplicita, nessuna chiamata a ensure_config_file().
     
     Args:
         output_date: Data in formato gg-mm-yyyy (es: "15-01-2026")
     """
     try:
         from app.global_config import set_active_output_date
+        # Scrittura esplicita: set_active_output_date() gestisce lock e salvataggio
         set_active_output_date(output_date)
-        logger.info(f"📅 [WEB] Data output aggiornata da operatore: {output_date}")
+        logger.info(f"📅 [WEB] Output-date salvato da operatore: {output_date} (PID={os.getpid()})")
         return JSONResponse({
             "success": True,
             "message": f"Data cartella di output aggiornata: {output_date}",
@@ -1473,6 +1522,48 @@ async def set_output_date(
     except ValueError as e:
         logger.error(f"Errore validazione data output: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Errore aggiornamento data output: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Errore durante l'aggiornamento: {str(e)}")
+
+@app.put("/api/config/output-date")
+async def set_output_date_json(
+    request: Request,
+    auth: bool = Depends(check_auth)
+):
+    """
+    Endpoint PUT per impostare la data attiva per la cartella di output (JSON).
+    
+    Questa data viene usata per TUTTI i documenti processati da questo momento in poi.
+    
+    REGOLA: Scrittura esplicita, nessuna chiamata a ensure_config_file().
+    
+    Body JSON:
+        {
+            "output_date": "gg-mm-yyyy" (es: "15-01-2026")
+        }
+    """
+    try:
+        body = await request.json()
+        output_date = body.get("output_date")
+        
+        if not output_date:
+            raise HTTPException(status_code=400, detail="Campo 'output_date' mancante nel body")
+        
+        from app.global_config import set_active_output_date
+        # Scrittura esplicita: set_active_output_date() gestisce lock e salvataggio
+        set_active_output_date(output_date)
+        logger.info(f"📅 [WEB] Output-date salvato da operatore: {output_date} (PID={os.getpid()})")
+        return JSONResponse({
+            "success": True,
+            "message": f"Data cartella di output aggiornata: {output_date}",
+            "output_date": output_date
+        })
+    except ValueError as e:
+        logger.error(f"Errore validazione data output: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Errore aggiornamento data output: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Errore durante l'aggiornamento: {str(e)}")

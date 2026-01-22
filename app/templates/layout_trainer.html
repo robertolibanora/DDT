@@ -169,6 +169,11 @@
         uploadForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             
+            // Prevenzione doppi submit: se già in loading, ignora
+            if (uploadBtn.disabled || uploadBtn.dataset.loading === 'true') {
+                return;
+            }
+            
             const file = fileInput.files[0];
             if (!file) {
                 showMessage('⚠️ Seleziona un file PDF', 'error');
@@ -180,8 +185,9 @@
                 return;
             }
             
-            // Disabilita il pulsante e mostra spinner
+            // Disabilita il pulsante e mostra spinner (prevenzione doppi submit)
             uploadBtn.disabled = true;
+            uploadBtn.dataset.loading = 'true';
             uploadBtnText.textContent = '⏳ Caricamento in corso...';
             uploadBtnSpinner.classList.remove('hidden');
             
@@ -199,11 +205,15 @@
                     showMessage(`❌ Errore: ${data.detail || 'Errore durante il caricamento'}`, 'error');
                 }
             } catch (error) {
-                console.error('Errore upload:', error);
+                // Log solo se non è network error
+                if (!error.isNetworkError) {
+                    console.error('Errore upload:', error);
+                }
                 showMessage(`❌ Errore durante il caricamento: ${error.message}`, 'error');
             } finally {
                 // Riabilita il pulsante
                 uploadBtn.disabled = false;
+                uploadBtn.dataset.loading = 'false';
                 uploadBtnText.textContent = '📤 Carica e Genera Anteprima';
                 uploadBtnSpinner.classList.add('hidden');
             }
@@ -259,6 +269,13 @@
         }
         
         document.getElementById('btn-save-layout').addEventListener('click', async () => {
+            const saveBtn = document.getElementById('btn-save-layout');
+            
+            // Prevenzione doppi submit: se già in loading, ignora
+            if (saveBtn && (saveBtn.disabled || saveBtn.dataset.loading === 'true')) {
+                return;
+            }
+            
             const supplierInput = document.getElementById('supplier-input').value.trim();
             const ruleNameInput = document.getElementById('rule-name-input').value.trim();
             
@@ -293,6 +310,10 @@
             formData.append('fields', JSON.stringify(fields));
             
             try {
+                // Disabilita bottone durante salvataggio
+                saveBtn.disabled = true;
+                saveBtn.dataset.loading = 'true';
+                
                 const data = await apiPostForm('/api/layout/rules/save', formData);
                 
                 if (data.success) {
@@ -304,8 +325,15 @@
                     showMessage(`❌ Errore: ${data.detail || 'Errore sconosciuto'}`, 'error');
                 }
             } catch (error) {
-                console.error('Errore salvataggio layout:', error);
+                // Log solo se non è network error
+                if (!error.isNetworkError) {
+                    console.error('Errore salvataggio layout:', error);
+                }
                 showMessage(`❌ Errore durante il salvataggio: ${error.message}`, 'error');
+            } finally {
+                // Riabilita bottone
+                saveBtn.disabled = false;
+                saveBtn.dataset.loading = 'false';
             }
         });
         

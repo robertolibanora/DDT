@@ -12,14 +12,21 @@
  * 
  * @param {string} url - URL della richiesta
  * @param {object} options - Opzioni fetch standard (method, headers, body, ecc.)
+ * @param {number} timeout - Timeout in millisecondi (default 5000ms)
  * @returns {Promise<Response>} Response della fetch
  * 
  * @throws {Error} Se la sessione è scaduta (401) o altri errori
+ * @throws {Error} Se timeout superato
  */
-async function apiFetch(url, options = {}) {
+async function apiFetch(url, options = {}, timeout = 5000) {
+    // Crea AbortController per timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    
     // Assicura che credentials sia sempre 'include' per includere cookie di sessione
     const fetchOptions = {
         credentials: 'include',
+        signal: controller.signal,
         ...options,
         // Merge headers se presenti
         headers: {
@@ -30,6 +37,7 @@ async function apiFetch(url, options = {}) {
     
     try {
         const response = await fetch(url, fetchOptions);
+        clearTimeout(timeoutId);
         
         // Gestione speciale per 401 (sessione scaduta)
         // IMPORTANTE: NON fare redirect se siamo già sulla pagina di login
@@ -73,30 +81,76 @@ async function apiFetch(url, options = {}) {
         return response;
         
     } catch (error) {
+        clearTimeout(timeoutId);
+        
         // Se è già un errore 401 gestito, rilancia così com'è
         if (error.message && error.message.includes('Sessione scaduta')) {
             throw error;
         }
         
+        // Gestione timeout
+        if (error.name === 'AbortError') {
+            const networkError = new Error(`Timeout chiamata API dopo ${timeout}ms: ${url}`);
+            networkError.isNetworkError = true;
+            throw networkError;
+        }
+        
         // Altri errori di rete/connessione
+        const networkError = new Error(error.message || 'Errore di connessione');
+        networkError.isNetworkError = true;
+        networkError.originalError = error;
         console.error('Errore chiamata API:', error);
-        throw error;
+        throw networkError;
     }
 }
 
 /**
- * Helper per chiamate GET JSON
+ * Helper per chiamate GET JSON con retry automatico per endpoint specifici
  */
-async function apiGet(url) {
-    const response = await apiFetch(url, {
-        method: 'GET'
-    });
+async function apiGet(url, retryCount = 0) {
+    const MAX_RETRIES = 1;
+    const RETRY_DELAY = 1000;
     
-    if (!response.ok) {
-        throw new Error(`Errore ${response.status}: ${response.statusText}`);
+    // Retry SOLO per GET /data e GET /api/watchdog-queue
+    const retryableEndpoints = ['/data', '/api/watchdog-queue'];
+    const shouldRetry = retryableEndpoints.some(endpoint => url.includes(endpoint));
+    
+    try {
+        const response = await apiFetch(url, {
+            method: 'GET'
+        });
+        
+        // Gestione 5xx come network error
+        if (response.status >= 500 && response.status < 600) {
+            const networkError = new Error(`Errore server ${response.status}: ${response.statusText}`);
+            networkError.isNetworkError = true;
+            throw networkError;
+        }
+        
+        if (!response.ok) {
+            const error = new Error(`Errore ${response.status}: ${response.statusText}`);
+            // Anche 4xx possono essere considerati network error se il server è down
+            if (response.status >= 502 && response.status < 600) {
+                error.isNetworkError = true;
+            }
+            throw error;
+        }
+        
+        return await response.json();
+    } catch (error) {
+        // Retry solo per endpoint specifici e solo se è network error
+        if (shouldRetry && retryCount < MAX_RETRIES && error.isNetworkError) {
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+            return apiGet(url, retryCount + 1);
+        }
+        
+        // Marca come network error se non già marcato
+        if (!error.isNetworkError && (error.message.includes('Timeout') || error.message.includes('network') || error.message.includes('fetch'))) {
+            error.isNetworkError = true;
+        }
+        
+        throw error;
     }
-    
-    return await response.json();
 }
 
 /**
@@ -108,9 +162,20 @@ async function apiPost(url, data = {}) {
         body: JSON.stringify(data)
     });
     
+    // Gestione 5xx come network error
+    if (response.status >= 500 && response.status < 600) {
+        const networkError = new Error(`Errore server ${response.status}: ${response.statusText}`);
+        networkError.isNetworkError = true;
+        throw networkError;
+    }
+    
     if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `Errore ${response.status}: ${response.statusText}`);
+        const error = new Error(errorData.detail || `Errore ${response.status}: ${response.statusText}`);
+        if (response.status >= 502 && response.status < 600) {
+            error.isNetworkError = true;
+        }
+        throw error;
     }
     
     return await response.json();
@@ -127,9 +192,20 @@ async function apiPostForm(url, formData) {
         headers: {}
     });
     
+    // Gestione 5xx come network error
+    if (response.status >= 500 && response.status < 600) {
+        const networkError = new Error(`Errore server ${response.status}: ${response.statusText}`);
+        networkError.isNetworkError = true;
+        throw networkError;
+    }
+    
     if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `Errore ${response.status}: ${response.statusText}`);
+        const error = new Error(errorData.detail || `Errore ${response.status}: ${response.statusText}`);
+        if (response.status >= 502 && response.status < 600) {
+            error.isNetworkError = true;
+        }
+        throw error;
     }
     
     return await response.json();
@@ -144,9 +220,20 @@ async function apiPut(url, data = {}) {
         body: JSON.stringify(data)
     });
     
+    // Gestione 5xx come network error
+    if (response.status >= 500 && response.status < 600) {
+        const networkError = new Error(`Errore server ${response.status}: ${response.statusText}`);
+        networkError.isNetworkError = true;
+        throw networkError;
+    }
+    
     if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `Errore ${response.status}: ${response.statusText}`);
+        const error = new Error(errorData.detail || `Errore ${response.status}: ${response.statusText}`);
+        if (response.status >= 502 && response.status < 600) {
+            error.isNetworkError = true;
+        }
+        throw error;
     }
     
     return await response.json();

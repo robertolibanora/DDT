@@ -225,7 +225,10 @@
                 document.getElementById('rule-modal').classList.add('hidden');
                 await loadRules();
             } catch (error) {
-                console.error('Errore salvataggio regola:', error);
+                // Log solo se non è network error
+                if (!error.isNetworkError) {
+                    console.error('Errore salvataggio regola:', error);
+                }
                 showMessage(`Errore: ${error.message}`, 'error');
             }
         }
@@ -247,18 +250,25 @@
         }
 
         async function reprocessDDT() {
+            const btn = document.getElementById('reprocess-btn');
+            
+            // Prevenzione doppi submit: se già in loading, ignora
+            if (btn && (btn.disabled || btn.dataset.loading === 'true')) {
+                return;
+            }
+            
             const docNumber = document.getElementById('reprocess-doc-number').value.trim();
             if (!docNumber) {
                 showMessage('Inserisci un numero documento', 'error');
                 return;
             }
 
-            const btn = document.getElementById('reprocess-btn');
             const originalText = btn.textContent;
             const resultDiv = document.getElementById('reprocess-result');
 
             try {
                 btn.disabled = true;
+                btn.dataset.loading = 'true';
                 btn.textContent = 'Riprocessamento...';
                 resultDiv.classList.add('hidden');
 
@@ -277,7 +287,10 @@
                 resultDiv.classList.remove('hidden');
                 showMessage('DDT riprocessato con successo');
             } catch (error) {
-                console.error('Errore reprocessing:', error);
+                // Log solo se non è network error
+                if (!error.isNetworkError) {
+                    console.error('Errore reprocessing:', error);
+                }
                 resultDiv.innerHTML = `
                     <div class="message error">
                         Errore: ${escapeHtml(error.message)}
@@ -287,6 +300,7 @@
                 showMessage(`Errore: ${error.message}`, 'error');
             } finally {
                 btn.disabled = false;
+                btn.dataset.loading = 'false';
                 btn.textContent = originalText;
             }
         }
@@ -298,8 +312,29 @@
         });
         document.getElementById('rule-form').addEventListener('submit', (e) => {
             e.preventDefault();
+            
+            const submitBtn = e.target.querySelector('button[type="submit"]');
+            
+            // Prevenzione doppi submit: se già in loading, ignora
+            if (submitBtn && (submitBtn.disabled || submitBtn.dataset.loading === 'true')) {
+                return;
+            }
+            
+            // Disabilita bottone durante salvataggio
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.dataset.loading = 'true';
+            }
+            
             const formData = new FormData(e.target);
-            saveRule(formData);
+            
+            saveRule(formData).finally(() => {
+                // Riabilita bottone
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.dataset.loading = 'false';
+                }
+            });
         });
         document.getElementById('reprocess-btn').addEventListener('click', reprocessDDT);
         document.getElementById('reprocess-doc-number').addEventListener('keypress', (e) => {

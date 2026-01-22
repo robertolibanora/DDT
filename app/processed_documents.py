@@ -30,6 +30,8 @@ class DocumentStatus(str, Enum):
 
 
 from app.paths import get_processed_documents_file
+from app.file_lock import file_lock
+
 PROCESSED_DOCUMENTS_FILE = get_processed_documents_file()
 
 # Struttura dati:
@@ -51,19 +53,25 @@ PROCESSED_DOCUMENTS_FILE = get_processed_documents_file()
 
 
 def _load_documents() -> Dict[str, Any]:
-    """Carica i documenti processati da file"""
+    """
+    Carica i documenti processati da file (READ-ONLY).
+    
+    Usa file locking condiviso per lettura cross-process.
+    """
     if not PROCESSED_DOCUMENTS_FILE.exists():
         return {"documents": {}}
     
     try:
-        with open(PROCESSED_DOCUMENTS_FILE, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            # Assicura che la struttura sia corretta
-            if "documents" not in data:
-                data = {"documents": {}}
-            return data
+        # File locking condiviso per lettura cross-process
+        with file_lock(PROCESSED_DOCUMENTS_FILE, exclusive=False, timeout=3.0):
+            with open(PROCESSED_DOCUMENTS_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                # Assicura che la struttura sia corretta
+                if "documents" not in data:
+                    data = {"documents": {}}
+                return data
     except json.JSONDecodeError as e:
-        logger.warning(f"Errore parsing processed_documents.json: {e}, ricreo file")
+        logger.warning(f"Errore parsing processed_documents.json: {e}, uso default")
         return {"documents": {}}
     except Exception as e:
         logger.error(f"Errore caricamento processed_documents: {e}", exc_info=True)
@@ -71,14 +79,35 @@ def _load_documents() -> Dict[str, Any]:
 
 
 def _save_documents(data: Dict[str, Any]) -> None:
-    """Salva i documenti processati su file"""
+    """
+    Salva i documenti processati su file (cross-process safe).
+    
+    Usa file locking esclusivo per scrittura atomica tra WEB e WORKER.
+    """
+    import os
+    pid = os.getpid()
+    
     try:
-        from app.paths import ensure_dir, safe_open
-        ensure_dir(PROCESSED_DOCUMENTS_FILE.parent)
-        with safe_open(PROCESSED_DOCUMENTS_FILE, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        # File locking esclusivo per scrittura cross-process
+        with file_lock(PROCESSED_DOCUMENTS_FILE, exclusive=True, timeout=3.0):
+            from app.paths import ensure_dir, safe_open
+            ensure_dir(PROCESSED_DOCUMENTS_FILE.parent)
+            
+            # Scrittura atomica: temp file + rename
+            temp_file = PROCESSED_DOCUMENTS_FILE.with_suffix('.json.tmp')
+            
+            with safe_open(temp_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            
+            temp_file.replace(PROCESSED_DOCUMENTS_FILE)
+            logger.debug(f"✅ processed_documents salvato (PID={pid})")
     except Exception as e:
-        logger.error(f"Errore salvataggio processed_documents: {e}", exc_info=True)
+        logger.error(
+            f"Errore salvataggio processed_documents: {e} (PID={pid})",
+            exc_info=True
+        )
         raise
 
 

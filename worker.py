@@ -268,7 +268,7 @@ def start_watcher_background(observer: Observer):
     Avvia il watcher in background.
     
     IMPORTANTE: observer.start() è NON-BLOCCANTE (watchdog usa thread interni).
-    Questa funzione viene eseguita in un thread daemon separato per sicurezza.
+    Thread NON daemon per shutdown graceful completo.
     """
     logger.info("👀 [WORKER] [WATCHDOG] Avvio watchdog observer...")
     try:
@@ -276,6 +276,10 @@ def start_watcher_background(observer: Observer):
         inbox_path = get_inbox_dir()
         print(f"👀 [WORKER] Watchdog attivo su {inbox_path} - I file PDF vengono processati automaticamente")
         logger.info(f"✅ [WORKER] [WATCHDOG] Watchdog avviato e monitora: {inbox_path}")
+        
+        # Attendi shutdown event (watchdog observer gestisce internamente i suoi thread)
+        _shutdown_event.wait()
+        logger.info("👀 [WORKER] [WATCHDOG] Shutdown event ricevuto, watchdog observer continuerà fino a stop()")
     except Exception as e:
         logger.error(f"❌ [WORKER] [WATCHDOG] Errore nell'avvio del watchdog: {e}", exc_info=True)
         print(f"❌ [WORKER] Errore nell'avvio del watchdog: {e}")
@@ -391,16 +395,17 @@ def stuck_cleanup_loop():
     """
     Loop periodico per controllare e marcare documenti PROCESSING bloccati come STUCK.
     
-    IMPORTANTE: Eseguito in thread daemon separato, NON blocca mai il main thread.
+    IMPORTANTE: Thread NON daemon per shutdown graceful completo.
+    Controlla _shutdown_event per uscire naturalmente dal loop.
     Usa Event.wait() invece di time.sleep() per permettere interruzione immediata.
     """
     import time
     from app.processed_documents import check_and_mark_stuck_documents
     # Esegui cleanup ogni 5 minuti
     cleanup_interval = 300  # 5 minuti
-    logger.info("🔍 [WORKER] [CLEANUP_LOOP] Cleanup loop STUCK avviato (thread daemon)")
+    logger.info("🔍 [WORKER] [CLEANUP_LOOP] Cleanup loop STUCK avviato (thread non-daemon)")
     
-    while not _cleanup_shutdown_flag.is_set():
+    while not _cleanup_shutdown_flag.is_set() and not _shutdown_event.is_set():
         try:
             # Usa wait invece di sleep per permettere interruzione immediata (NON-BLOCCANTE)
             if _cleanup_shutdown_flag.wait(timeout=cleanup_interval):
@@ -408,8 +413,13 @@ def stuck_cleanup_loop():
                 logger.info("🧹 [WORKER] [CLEANUP_LOOP] Shutdown richiesto, terminazione...")
                 break
             
+            # Controlla anche _shutdown_event principale
+            if _shutdown_event.is_set():
+                logger.info("🧹 [WORKER] [CLEANUP_LOOP] Shutdown event principale impostato, terminazione...")
+                break
+            
             # Esegui cleanup solo se shutdown non richiesto
-            if not _cleanup_shutdown_flag.is_set():
+            if not _cleanup_shutdown_flag.is_set() and not _shutdown_event.is_set():
                 logger.debug("🔍 [WORKER] [CLEANUP_LOOP] Esecuzione controllo STUCK...")
                 stuck_count = check_and_mark_stuck_documents()
                 if stuck_count > 0:
@@ -581,7 +591,8 @@ def queued_processing_loop():
     """
     Loop periodico per processare documenti QUEUED (caricati manualmente via /upload).
     
-    IMPORTANTE: Eseguito in thread daemon separato, NON blocca mai il main thread.
+    IMPORTANTE: Thread NON daemon per shutdown graceful completo.
+    Controlla _shutdown_event per uscire naturalmente dal loop.
     Usa Event.wait() invece di time.sleep() per permettere interruzione immediata.
     """
     import time
@@ -589,9 +600,9 @@ def queued_processing_loop():
     # Controlla ogni 10 secondi (più frequente rispetto a cleanup STUCK)
     check_interval = 10  # 10 secondi
     
-    logger.info("📋 [WORKER] [QUEUED_LOOP] Loop processing QUEUED avviato (thread daemon)")
+    logger.info("📋 [WORKER] [QUEUED_LOOP] Loop processing QUEUED avviato (thread non-daemon)")
     
-    while not _queued_processing_shutdown_flag.is_set():
+    while not _queued_processing_shutdown_flag.is_set() and not _shutdown_event.is_set():
         try:
             # Usa wait invece di sleep per permettere interruzione immediata (NON-BLOCCANTE)
             if _queued_processing_shutdown_flag.wait(timeout=check_interval):
@@ -599,8 +610,13 @@ def queued_processing_loop():
                 logger.info("📋 [WORKER] [QUEUED_LOOP] Shutdown richiesto, terminazione...")
                 break
             
+            # Controlla anche _shutdown_event principale
+            if _shutdown_event.is_set():
+                logger.info("📋 [WORKER] [QUEUED_LOOP] Shutdown event principale impostato, terminazione...")
+                break
+            
             # Esegui processing solo se shutdown non richiesto
-            if not _queued_processing_shutdown_flag.is_set():
+            if not _queued_processing_shutdown_flag.is_set() and not _shutdown_event.is_set():
                 logger.debug("📋 [WORKER] [QUEUED_LOOP] Controllo documenti QUEUED...")
                 queued_docs = get_queued_documents()
                 
@@ -608,7 +624,7 @@ def queued_processing_loop():
                     logger.info(f"📋 [WORKER] [QUEUED_LOOP] Trovati {len(queued_docs)} documento(i) QUEUED, avvio processing...")
                     # Processa ogni documento QUEUED in un thread separato (non bloccare il loop)
                     for doc_info in queued_docs:
-                        # Avvia processing in thread daemon separato
+                        # Avvia processing in thread daemon separato (OK per task singoli)
                         thread = threading.Thread(
                             target=process_queued_document,
                             args=(doc_info,),
@@ -672,8 +688,12 @@ def init_background_tasks():
 def signal_handler(signum, frame):
     """
     Gestisce SIGTERM/SIGINT per shutdown graceful.
+    
+    REGOLA: NON chiamare sys.exit() qui, solo impostare flag.
+    Il main loop gestirà il cleanup completo.
     """
-    logger.critical("⛔ [WORKER] [SIGNAL] Segnale di shutdown ricevuto, avvio shutdown graceful...")
+    signal_name = "SIGTERM" if signum == signal.SIGTERM else "SIGINT"
+    logger.critical(f"⛔ [WORKER] [SIGNAL] {signal_name} ricevuto (PID={os.getpid()}), avvio shutdown graceful...")
     _shutdown_event.set()
 
 
@@ -708,8 +728,8 @@ def main():
     try:
         handler = DDTHandler()
         observer.schedule(handler, inbox_path, recursive=False)
-        # REGOLA FERREA: daemon=True per permettere shutdown veloce
-        watcher_thread = threading.Thread(target=start_watcher_background, args=(observer,), daemon=True)
+        # Thread NON daemon per shutdown graceful completo
+        watcher_thread = threading.Thread(target=start_watcher_background, args=(observer,), daemon=False)
         watcher_thread.start()
         logger.info(f"✅ [WORKER] Watchdog configurato per monitorare: {inbox_path}")
     except Exception as e:
@@ -721,18 +741,18 @@ def main():
     _cleanup_shutdown_flag.clear()  # Reset flag all'avvio
     
     logger.info("🔍 [WORKER] Avvio cleanup thread STUCK...")
-    _cleanup_thread = threading.Thread(target=stuck_cleanup_loop, daemon=True)
+    _cleanup_thread = threading.Thread(target=stuck_cleanup_loop, daemon=False)
     _cleanup_thread.start()
-    logger.info("✅ [WORKER] Cleanup periodico STUCK avviato (controllo ogni 5 minuti, thread daemon)")
+    logger.info("✅ [WORKER] Cleanup periodico STUCK avviato (controllo ogni 5 minuti, thread non-daemon)")
     
     # Avvia loop periodico per processare documenti QUEUED
     global _queued_processing_thread, _queued_processing_shutdown_flag
     _queued_processing_shutdown_flag.clear()  # Reset flag all'avvio
     
     logger.info("📋 [WORKER] Avvio queued processing thread...")
-    _queued_processing_thread = threading.Thread(target=queued_processing_loop, daemon=True)
+    _queued_processing_thread = threading.Thread(target=queued_processing_loop, daemon=False)
     _queued_processing_thread.start()
-    logger.info("✅ [WORKER] Loop processing QUEUED avviato (controllo ogni 10 secondi, thread daemon)")
+    logger.info("✅ [WORKER] Loop processing QUEUED avviato (controllo ogni 10 secondi, thread non-daemon)")
     
     logger.info("✅ [WORKER] Worker process avviato correttamente")
     
@@ -743,23 +763,36 @@ def main():
         logger.info("⛔ [WORKER] Shutdown richiesto, avvio cleanup...")
     except KeyboardInterrupt:
         logger.info("⛔ [WORKER] Interruzione da tastiera, avvio cleanup...")
+        _shutdown_event.set()
     finally:
-        # Shutdown graceful
+        # Shutdown graceful: ferma tutti i thread con join e timeout
         logger.critical("⛔ [WORKER] [SHUTDOWN] Shutdown richiesto, arresto thread/observer...")
+        
+        # Imposta flag di shutdown per tutti i thread
+        _cleanup_shutdown_flag.set()
+        _queued_processing_shutdown_flag.set()
         
         # Ferma queued processing thread PRIMA (più importante)
         try:
-            logger.info("📋 [WORKER] [SHUTDOWN] Fermata queued processing thread...")
-            stop_queued_processing_thread_safely()
-            logger.info("✅ [WORKER] [SHUTDOWN] Queued processing thread fermato")
+            logger.info("📋 [WORKER] [SHUTDOWN] Attesa terminazione queued processing thread (timeout 10s)...")
+            if _queued_processing_thread and _queued_processing_thread.is_alive():
+                _queued_processing_thread.join(timeout=10.0)
+                if _queued_processing_thread.is_alive():
+                    logger.warning("⚠️ [WORKER] [SHUTDOWN] Queued processing thread non terminato entro timeout 10s")
+                else:
+                    logger.info("✅ [WORKER] [SHUTDOWN] Queued processing thread terminato correttamente")
         except Exception as e:
             logger.error(f"❌ [WORKER] [SHUTDOWN] Errore durante shutdown queued processing thread: {e}", exc_info=True)
         
-        # Ferma cleanup thread PRIMA del watchdog (ordine inverso rispetto startup)
+        # Ferma cleanup thread
         try:
-            logger.info("🧹 [WORKER] [SHUTDOWN] Fermata cleanup thread...")
-            stop_cleanup_thread_safely()
-            logger.info("✅ [WORKER] [SHUTDOWN] Cleanup thread fermato")
+            logger.info("🧹 [WORKER] [SHUTDOWN] Attesa terminazione cleanup thread (timeout 10s)...")
+            if _cleanup_thread and _cleanup_thread.is_alive():
+                _cleanup_thread.join(timeout=10.0)
+                if _cleanup_thread.is_alive():
+                    logger.warning("⚠️ [WORKER] [SHUTDOWN] Cleanup thread non terminato entro timeout 10s")
+                else:
+                    logger.info("✅ [WORKER] [SHUTDOWN] Cleanup thread terminato correttamente")
         except Exception as e:
             logger.error(f"❌ [WORKER] [SHUTDOWN] Errore durante shutdown cleanup thread: {e}", exc_info=True)
         
@@ -771,7 +804,21 @@ def main():
         except Exception as e:
             logger.error(f"❌ [WORKER] [SHUTDOWN] Errore durante shutdown watchdog: {e}", exc_info=True)
         
+        # Attendi watcher thread se ancora attivo
+        try:
+            if 'watcher_thread' in locals() and watcher_thread.is_alive():
+                logger.info("👀 [WORKER] [SHUTDOWN] Attesa terminazione watcher thread (timeout 5s)...")
+                watcher_thread.join(timeout=5.0)
+                if watcher_thread.is_alive():
+                    logger.warning("⚠️ [WORKER] [SHUTDOWN] Watcher thread non terminato entro timeout 5s")
+                else:
+                    logger.info("✅ [WORKER] [SHUTDOWN] Watcher thread terminato correttamente")
+        except Exception as e:
+            logger.error(f"❌ [WORKER] [SHUTDOWN] Errore durante shutdown watcher thread: {e}", exc_info=True)
+        
         logger.critical("✅ [WORKER] [SHUTDOWN] Shutdown completato (tutti i thread/task fermati)")
+        # Exit pulito (systemd gestirà il processo)
+        sys.exit(0)
 
 
 if __name__ == "__main__":

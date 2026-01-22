@@ -47,24 +47,36 @@ done
 sleep "$WAIT_STOP"
 
 # ==============================
-# VERIFICA PROCESSI RESIDUI
+# VERIFICA PROCESSI RESIDUI (SENZA KILL -9)
 # ==============================
 log "Verifica processi residui"
 
+# Attendi fino a 30 secondi che i processi terminino
+MAX_WAIT=30
+WAIT_COUNT=0
+
+while [ $WAIT_COUNT -lt $MAX_WAIT ]; do
+  PIDS=$(pgrep -f "uvicorn main:app|worker.py" || true)
+  
+  if [[ -z "$PIDS" ]]; then
+    log "Nessun processo residuo trovato"
+    break
+  fi
+  
+  if [ $WAIT_COUNT -eq 0 ]; then
+    warn "Processi ancora attivi: $PIDS"
+    warn "Attesa terminazione graceful (max ${MAX_WAIT}s)..."
+  fi
+  
+  sleep 1
+  WAIT_COUNT=$((WAIT_COUNT + 1))
+done
+
+# Verifica finale
 PIDS=$(pgrep -f "uvicorn main:app|worker.py" || true)
 
 if [[ -n "$PIDS" ]]; then
-  warn "Processi ancora attivi: $PIDS"
-  warn "Tentativo SIGTERM"
-  kill $PIDS || true
-  sleep 2
-fi
-
-PIDS=$(pgrep -f "uvicorn main:app|worker.py" || true)
-
-if [[ -n "$PIDS" ]]; then
-  warn "SIGTERM fallito → SIGKILL"
-  kill -9 $PIDS || true
+  die "ERRORE: Processi ancora attivi dopo ${MAX_WAIT}s: $PIDS\nVerifica i log di systemd: journalctl -u ddt-web -u ddt-worker"
 fi
 
 # ==============================
