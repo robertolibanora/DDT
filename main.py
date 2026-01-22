@@ -112,6 +112,11 @@ _cleanup_thread: Optional[threading.Thread] = None
 _shutdown_in_progress = False
 _cleanup_shutdown_flag = threading.Event()  # Flag per fermare il cleanup loop
 
+# Semaforo per limitare concorrenza processing PDF (evita saturazione CPU/RAM)
+# Default: max 2 PDF processati simultaneamente (configurabile via env var)
+_MAX_CONCURRENT_PDF_PROCESSING = int(os.getenv("DDT_MAX_CONCURRENT_PDF", "2"))
+_pdf_processing_semaphore = threading.Semaphore(_MAX_CONCURRENT_PDF_PROCESSING)
+
 
 def stop_watchdog_safely():
     """
@@ -241,165 +246,185 @@ class DDTHandler(FileSystemEventHandler):
         IMPORTANTE: Questa funzione è SEMPRE eseguita in un thread daemon separato
         (chiamata da on_created/on_moved) per NON bloccare mai il watchdog filesystem.
         Operazioni pesanti (extract_from_pdf, I/O filesystem) sono accettabili qui.
+        
+        Usa semaforo per limitare concorrenza e evitare saturazione CPU/RAM.
         """
-        logger.info(f"📄 [PROCESS_PDF] Avvio processing PDF: {Path(file_path).name}")
+        # Flag per tracciare se il semaforo è stato acquisito (evita double-release)
+        acquired = False
         
-        if not self._is_pdf_file(file_path):
-            logger.debug(f"⏭️ [PROCESS_PDF] File non PDF, ignoro: {file_path}")
+        # Acquisisci semaforo per limitare concorrenza (max _MAX_CONCURRENT_PDF_PROCESSING simultanei)
+        if not _pdf_processing_semaphore.acquire(timeout=300):  # Timeout 5 minuti
+            logger.error(f"❌ [PROCESS_PDF] Timeout acquisizione semaforo per {Path(file_path).name} - troppi PDF in processing")
             return
         
-        # Normalizza il percorso per evitare duplicati
-        from app.paths import get_inbox_dir
-        file_path_obj = Path(file_path).resolve()
-        file_path = str(file_path_obj)
-        
-        # Verifica che il file sia ancora in inbox (potrebbe essere stato spostato)
-        inbox_path = get_inbox_dir()
-        if not str(file_path_obj).startswith(str(inbox_path.resolve())):
-            logger.debug(f"⏭️ File non in inbox, ignoro: {Path(file_path).name}")
-            return
-        
-        # Attendi che il file sia completamente scritto (aumentato a 15 secondi per file grandi)
-        if not self._wait_for_file_ready(file_path, max_wait=15):
-            logger.warning(f"⏳ File non pronto dopo l'attesa: {file_path}")
-            return
+        # Semaforo acquisito con successo
+        acquired = True
         
         try:
-            from app.processed_documents import (
-                calculate_file_hash,
-                should_process_document,
-                register_document,
-                mark_document_error,
-                DocumentStatus,
-                is_document_finalized
-            )
+            logger.debug(f"📄 [PROCESS_PDF] Avvio processing PDF: {Path(file_path).name}")
             
-            # Calcola hash SHA256 PRIMA di qualsiasi controllo
-            doc_hash = calculate_file_hash(file_path)
-            
-            # Verifica se il documento è già FINALIZED (doppio controllo per sicurezza)
-            if is_document_finalized(doc_hash):
-                logger.info(f"⏭️ Documento già FINALIZED (hash={doc_hash[:16]}...), ignoro evento watchdog - {Path(file_path).name}")
+            if not self._is_pdf_file(file_path):
+                logger.debug(f"⏭️ [PROCESS_PDF] File non PDF, ignoro: {file_path}")
                 return
             
-            # Verifica se il documento dovrebbe essere processato
-            should_process, reason = should_process_document(doc_hash)
-            
-            if not should_process:
-                if reason == "already_finalized":
-                    logger.info(f"⏭️ Documento già FINALIZED (hash={doc_hash[:16]}...), ignoro evento watchdog - {Path(file_path).name}")
-                elif reason == "error_final":
-                    logger.info(f"⏭️ Documento in ERROR_FINAL (hash={doc_hash[:16]}...), ignoro evento watchdog - {Path(file_path).name}")
-                elif reason == "already_processing":
-                    logger.info(f"⏭️ Documento già in PROCESSING (hash={doc_hash[:16]}...), ignoro evento watchdog - {Path(file_path).name}")
-                elif reason == "already_ready" or reason == "already_ready_for_review":
-                    logger.debug(f"⏭️ Documento già READY_FOR_REVIEW (hash={doc_hash[:16]}...), ignoro evento watchdog - {Path(file_path).name}")
-                else:
-                    logger.info(f"⏭️ Documento non processabile: {reason} (hash={doc_hash[:16]}...) - {Path(file_path).name}")
-                return
-            
-            # REGOLA FERREA: Usa transition_document_state invece di register_document
-            from app.processed_documents import transition_document_state
-            transition_document_state(
-                doc_hash=doc_hash,
-                from_state=None,
-                to_state=DocumentStatus.PROCESSING,
-                reason="Watchdog rilevato nuovo PDF - avvio processing",
-                metadata={
-                    "file_path": file_path,
-                    "file_name": Path(file_path).name
-                }
-            )
-            
-            logger.info(f"📄 Nuovo DDT rilevato: hash={doc_hash[:16]}... file={Path(file_path).name}")
-            
-            import base64
-            from app.watchdog_queue import add_to_queue
-            
-            # Leggi il file PDF
-            from app.paths import safe_open
+            # Normalizza il percorso per evitare duplicati
+            from app.paths import get_inbox_dir
             file_path_obj = Path(file_path).resolve()
-            with safe_open(file_path_obj, 'rb') as f:
-                pdf_bytes = f.read()
+            file_path = str(file_path_obj)
             
-            if len(pdf_bytes) == 0:
-                logger.warning(f"⚠️ File PDF vuoto: {file_path}")
-                mark_document_error(doc_hash, "File PDF vuoto")
+            # Verifica che il file sia ancora in inbox (potrebbe essere stato spostato)
+            inbox_path = get_inbox_dir()
+            if not str(file_path_obj).startswith(str(inbox_path.resolve())):
+                logger.debug(f"⏭️ File non in inbox, ignoro: {Path(file_path).name}")
                 return
             
-            # Estrai i dati (ma NON salvare ancora)
-            # OPERAZIONE PESANTE: extract_from_pdf può richiedere secondi/minuti
-            # OK perché siamo già in un thread daemon separato (non blocca watchdog)
-            logger.info(f"🔍 [PROCESS_PDF] Avvio estrazione dati da PDF: {Path(file_path).name}")
-            data = extract_from_pdf(file_path)
-            extraction_mode = data.pop("_extraction_mode", None)  # Estrai extraction_mode dal risultato
-            ai_fallback_used = data.pop("_ai_fallback_used", False)  # Estrai ai_fallback_used dal risultato
-            ai_fallback_fields = data.pop("_ai_fallback_fields", [])  # Estrai ai_fallback_fields dal risultato
-            if ai_fallback_used:
-                logger.warning(f"⚠️ [PROCESS_PDF] AI fallback utilizzato: campi={ai_fallback_fields}")
-            logger.info(f"✅ [PROCESS_PDF] Estrazione dati completata: {Path(file_path).name} (mode={extraction_mode}, ai_fallback_used={ai_fallback_used})")
+            # Attendi che il file sia completamente scritto (aumentato a 15 secondi per file grandi)
+            if not self._wait_for_file_ready(file_path, max_wait=15):
+                logger.warning(f"⏳ File non pronto dopo l'attesa: {file_path}")
+                return
             
-            # Verifica se questo numero documento è già in Excel (controllo finale)
             try:
-                from app.excel import read_excel_as_dict
-                existing_data = read_excel_as_dict()
-                for row in existing_data.get("rows", []):
-                    if (row.get("numero_documento") == data.get("numero_documento") and 
-                        row.get("mittente", "").strip() == data.get("mittente", "").strip()):
-                        logger.info("⏭️ DDT già presente in Excel (numero: %s), marco come FINALIZED - %s", 
-                                  data.get('numero_documento'), Path(file_path).name)
-                        from app.processed_documents import mark_document_finalized
-                        mark_document_finalized(doc_hash)
-                        return
-            except (OSError, IOError, PermissionError) as e:
-                # Errori di I/O su path critici: logga ma continua (non bloccare il processing)
-                # Questo è in un thread daemon, quindi non possiamo sollevare HTTPException
-                logger.error("Errore I/O controllo Excel (path critico): %s - continuo processing", str(e))
-                # Continua comunque
+                from app.processed_documents import (
+                    calculate_file_hash,
+                    should_process_document,
+                    register_document,
+                    mark_document_error,
+                    DocumentStatus,
+                    is_document_finalized
+                )
+                
+                # Calcola hash SHA256 PRIMA di qualsiasi controllo
+                doc_hash = calculate_file_hash(file_path)
+                
+                # Verifica se il documento è già FINALIZED (doppio controllo per sicurezza)
+                if is_document_finalized(doc_hash):
+                    logger.info(f"⏭️ Documento già FINALIZED (hash={doc_hash[:16]}...), ignoro evento watchdog - {Path(file_path).name}")
+                    return
+                
+                # Verifica se il documento dovrebbe essere processato
+                should_process, reason = should_process_document(doc_hash)
+                
+                if not should_process:
+                    if reason == "already_finalized":
+                        logger.info(f"⏭️ Documento già FINALIZED (hash={doc_hash[:16]}...), ignoro evento watchdog - {Path(file_path).name}")
+                    elif reason == "error_final":
+                        logger.info(f"⏭️ Documento in ERROR_FINAL (hash={doc_hash[:16]}...), ignoro evento watchdog - {Path(file_path).name}")
+                    elif reason == "already_processing":
+                        logger.info(f"⏭️ Documento già in PROCESSING (hash={doc_hash[:16]}...), ignoro evento watchdog - {Path(file_path).name}")
+                    elif reason == "already_ready" or reason == "already_ready_for_review":
+                        logger.debug(f"⏭️ Documento già READY_FOR_REVIEW (hash={doc_hash[:16]}...), ignoro evento watchdog - {Path(file_path).name}")
+                    else:
+                        logger.info(f"⏭️ Documento non processabile: {reason} (hash={doc_hash[:16]}...) - {Path(file_path).name}")
+                    return
+                
+                # REGOLA FERREA: Usa transition_document_state invece di register_document
+                from app.processed_documents import transition_document_state
+                transition_document_state(
+                    doc_hash=doc_hash,
+                    from_state=None,
+                    to_state=DocumentStatus.PROCESSING,
+                    reason="Watchdog rilevato nuovo PDF - avvio processing",
+                    metadata={
+                        "file_path": file_path,
+                        "file_name": Path(file_path).name
+                    }
+                )
+                
+                logger.info(f"📄 Nuovo DDT rilevato: hash={doc_hash[:16]}... file={Path(file_path).name}")
+                
+                import base64
+                from app.watchdog_queue import add_to_queue
+                
+                # Leggi il file PDF
+                from app.paths import safe_open
+                file_path_obj = Path(file_path).resolve()
+                with safe_open(file_path_obj, 'rb') as f:
+                    pdf_bytes = f.read()
+                
+                if len(pdf_bytes) == 0:
+                    logger.warning(f"⚠️ File PDF vuoto: {file_path}")
+                    mark_document_error(doc_hash, "File PDF vuoto")
+                    return
+                
+                # Estrai i dati (ma NON salvare ancora)
+                # OPERAZIONE PESANTE: extract_from_pdf può richiedere secondi/minuti
+                # OK perché siamo già in un thread daemon separato (non blocca watchdog)
+                logger.debug(f"🔍 [PROCESS_PDF] Avvio estrazione dati da PDF: {Path(file_path).name}")
+                data = extract_from_pdf(file_path)
+                extraction_mode = data.pop("_extraction_mode", None)  # Estrai extraction_mode dal risultato
+                ai_fallback_used = data.pop("_ai_fallback_used", False)  # Estrai ai_fallback_used dal risultato
+                ai_fallback_fields = data.pop("_ai_fallback_fields", [])  # Estrai ai_fallback_fields dal risultato
+                if ai_fallback_used:
+                    logger.warning(f"⚠️ [PROCESS_PDF] AI fallback utilizzato: campi={ai_fallback_fields}")
+                logger.debug(f"✅ [PROCESS_PDF] Estrazione dati completata: {Path(file_path).name} (mode={extraction_mode}, ai_fallback_used={ai_fallback_used})")
+                
+                # Verifica se questo numero documento è già in Excel (controllo finale)
+                try:
+                    from app.excel import read_excel_as_dict
+                    existing_data = read_excel_as_dict()
+                    for row in existing_data.get("rows", []):
+                        if (row.get("numero_documento") == data.get("numero_documento") and 
+                            row.get("mittente", "").strip() == data.get("mittente", "").strip()):
+                            logger.info("⏭️ DDT già presente in Excel (numero: %s), marco come FINALIZED - %s", 
+                                      data.get('numero_documento'), Path(file_path).name)
+                            from app.processed_documents import mark_document_finalized
+                            mark_document_finalized(doc_hash)
+                            return
+                except (OSError, IOError, PermissionError) as e:
+                    # Errori di I/O su path critici: logga ma continua (non bloccare il processing)
+                    # Questo è in un thread daemon, quindi non possiamo sollevare HTTPException
+                    logger.error("Errore I/O controllo Excel (path critico): %s - continuo processing", str(e))
+                    # Continua comunque
+                except Exception as e:
+                    logger.debug("Errore controllo Excel: %s", str(e))
+                    # Continua comunque
+                
+                # Converti PDF in base64
+                pdf_base64 = base64.b64encode(pdf_bytes).decode()
+                
+                # Genera PNG di anteprima
+                preview_generated = False
+                try:
+                    preview_path = generate_preview_png(file_path, doc_hash)
+                    if preview_path:
+                        logger.info(f"✅ PNG anteprima generata: {preview_path}")
+                        preview_generated = True
+                    else:
+                        logger.warning(f"⚠️ Impossibile generare PNG anteprima per {doc_hash[:16]}...")
+                except Exception as e:
+                    logger.warning(f"⚠️ Errore generazione PNG anteprima: {e}")
+                
+                # Aggiungi alla coda per l'anteprima (con extraction_mode e ai_fallback_used)
+                logger.debug(f"📋 [PROCESS_PDF] Aggiunta alla coda watchdog: {Path(file_path).name}")
+                queue_id = add_to_queue(file_path, data, pdf_base64, doc_hash, extraction_mode, ai_fallback_used=ai_fallback_used, ai_fallback_fields=ai_fallback_fields)
+                logger.info(f"✅ [PROCESS_PDF] DDT aggiunto alla coda: queue_id={queue_id} hash={doc_hash[:16]}... numero={data.get('numero_documento', 'N/A')}")
+                
+                # Marca come READY_FOR_REVIEW quando tutto è pronto (dati estratti + PNG + coda)
+                # Questo permette alla dashboard di distinguere PROCESSING (tecnico) da READY_FOR_REVIEW (funzionale)
+                from app.processed_documents import mark_document_ready
+                mark_document_ready(doc_hash, queue_id, extraction_mode)
+                logger.debug(f"✅ [PROCESS_PDF] Documento READY_FOR_REVIEW: hash={doc_hash[:16]}... numero={data.get('numero_documento', 'N/A')} extraction_mode={extraction_mode or 'N/A'}")
+            
+            except ValueError as e:
+                logger.error(f"❌ [PROCESS_PDF] Errore validazione DDT: {e}")
+                if 'doc_hash' in locals():
+                    mark_document_error(doc_hash, f"Errore validazione: {str(e)}")
+            except FileNotFoundError:
+                logger.warning(f"⚠️ [PROCESS_PDF] File non trovato (potrebbe essere stato spostato): {file_path}")
+                if 'doc_hash' in locals():
+                    mark_document_error(doc_hash, "File non trovato")
             except Exception as e:
-                logger.debug("Errore controllo Excel: %s", str(e))
-                # Continua comunque
-            
-            # Converti PDF in base64
-            pdf_base64 = base64.b64encode(pdf_bytes).decode()
-            
-            # Genera PNG di anteprima
-            preview_generated = False
-            try:
-                preview_path = generate_preview_png(file_path, doc_hash)
-                if preview_path:
-                    logger.info(f"✅ PNG anteprima generata: {preview_path}")
-                    preview_generated = True
-                else:
-                    logger.warning(f"⚠️ Impossibile generare PNG anteprima per {doc_hash[:16]}...")
-            except Exception as e:
-                logger.warning(f"⚠️ Errore generazione PNG anteprima: {e}")
-            
-            # Aggiungi alla coda per l'anteprima (con extraction_mode e ai_fallback_used)
-            logger.info(f"📋 [PROCESS_PDF] Aggiunta alla coda watchdog: {Path(file_path).name}")
-            queue_id = add_to_queue(file_path, data, pdf_base64, doc_hash, extraction_mode, ai_fallback_used=ai_fallback_used, ai_fallback_fields=ai_fallback_fields)
-            logger.info(f"✅ [PROCESS_PDF] DDT aggiunto alla coda: queue_id={queue_id} hash={doc_hash[:16]}... numero={data.get('numero_documento', 'N/A')}")
-            
-            # Marca come READY_FOR_REVIEW quando tutto è pronto (dati estratti + PNG + coda)
-            # Questo permette alla dashboard di distinguere PROCESSING (tecnico) da READY_FOR_REVIEW (funzionale)
-            from app.processed_documents import mark_document_ready
-            mark_document_ready(doc_hash, queue_id, extraction_mode)
-            logger.info(f"✅ [PROCESS_PDF] Documento READY_FOR_REVIEW: hash={doc_hash[:16]}... numero={data.get('numero_documento', 'N/A')} extraction_mode={extraction_mode or 'N/A'}")
-            
-        except ValueError as e:
-            logger.error(f"❌ [PROCESS_PDF] Errore validazione DDT: {e}")
-            if 'doc_hash' in locals():
-                mark_document_error(doc_hash, f"Errore validazione: {str(e)}")
-        except FileNotFoundError:
-            logger.warning(f"⚠️ [PROCESS_PDF] File non trovato (potrebbe essere stato spostato): {file_path}")
-            if 'doc_hash' in locals():
-                mark_document_error(doc_hash, "File non trovato")
-        except Exception as e:
-            logger.error(f"❌ [PROCESS_PDF] Errore nel parsing DDT: {e}", exc_info=True)
-            if 'doc_hash' in locals():
-                mark_document_error(doc_hash, f"Errore parsing: {str(e)}")
+                logger.error(f"❌ [PROCESS_PDF] Errore nel parsing DDT: {e}", exc_info=True)
+                if 'doc_hash' in locals():
+                    mark_document_error(doc_hash, f"Errore parsing: {str(e)}")
         finally:
-            logger.info(f"🏁 [PROCESS_PDF] Processing completato: {Path(file_path).name}")
+            logger.debug(f"🏁 [PROCESS_PDF] Processing completato: {Path(file_path).name}")
+            # Rilascia semaforo solo se acquisito (evita double-release)
+            if acquired:
+                _pdf_processing_semaphore.release()
+                logger.debug(f"🔓 [PROCESS_PDF] Semaforo rilasciato per {Path(file_path).name}")
+            else:
+                logger.debug(f"⚠️ [PROCESS_PDF] Semaforo non rilasciato (non acquisito) per {Path(file_path).name}")
     
     def on_created(self, event):
         """
@@ -527,58 +552,13 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error("%s [BACKGROUND_TASKS] Errore migrazione stati: %s", role_label, str(e), exc_info=True)
         
-        # Task 2: Caricamento layout models (isolato)
-        try:
-            logger.info("%s [BACKGROUND_TASKS] Avvio caricamento layout models...", role_label)
-            from app.layout_rules.manager import load_layout_rules
-            rules = load_layout_rules()
-            if rules:
-                logger.info("%s [BACKGROUND_TASKS] Layout models disponibili: %d modello(i)", role_label, len(rules))
-                # Log per mittente
-                try:
-                    from app.layout_rules.manager import normalize_sender
-                    sender_counts = {}
-                    for rule_name, rule in rules.items():
-                        try:
-                            supplier = rule.match.supplier
-                            sender_norm = normalize_sender(supplier)
-                            sender_counts[sender_norm] = sender_counts.get(sender_norm, 0) + 1
-                        except Exception as e:
-                            logger.warning("%s [BACKGROUND_TASKS] Errore processing regola %s: %s", role_label, rule_name, str(e))
-                            continue
-                    for sender_norm, count in sender_counts.items():
-                        logger.info("   📦 %s [BACKGROUND_TASKS] Loaded %d layout model(s) for sender: %s", role_label, count, sender_norm)
-                except Exception as e:
-                    logger.warning("%s [BACKGROUND_TASKS] Errore logging mittenti: %s", role_label, str(e))
-            else:
-                logger.warning("%s [BACKGROUND_TASKS] ⚠️ Nessun layout model disponibile - sistema operativo ma userà AI fallback", role_label)
-                logger.info("%s [HEARTBEAT] Sistema operativo – nessun documento in elaborazione – 0 layout models", role_label)
-        except SyntaxError as e:
-            logger.error("%s [BACKGROUND_TASKS] ❌ [CRITICAL] SyntaxError in caricamento layout models: %s - sistema operativo in modalità degradata", role_label, str(e))
-            logger.info("%s [HEARTBEAT] Sistema operativo – nessun documento in elaborazione – errore caricamento layout models (SyntaxError)", role_label)
-        except ImportError as e:
-            logger.error("%s [BACKGROUND_TASKS] ❌ [CRITICAL] ImportError in caricamento layout models: %s - sistema operativo in modalità degradata", role_label, str(e))
-            logger.info("%s [HEARTBEAT] Sistema operativo – nessun documento in elaborazione – errore caricamento layout models (ImportError)", role_label)
-        except Exception as e:
-            logger.error("%s [BACKGROUND_TASKS] Errore caricamento layout models: %s", role_label, str(e), exc_info=True)
-            logger.info("%s [HEARTBEAT] Sistema operativo – nessun documento in elaborazione – errore caricamento layout models", role_label)
+        # Task 2: Layout models - LAZY LOADING (non caricare all'avvio, solo quando necessario)
+        # Layout rules vengono caricati on-demand quando serve processare un PDF
+        logger.debug("%s [BACKGROUND_TASKS] Layout models: lazy loading (caricati on-demand)", role_label)
         
-        # Task 3: Carica e pulisci coda watchdog (isolato)
-        try:
-            logger.info("%s [BACKGROUND_TASKS] Avvio caricamento e pulizia coda watchdog...", role_label)
-            from app.watchdog_queue import _load_queue, cleanup_old_items
-            _load_queue()
-            removed_count = cleanup_old_items()
-            if removed_count > 0:
-                logger.info("%s [BACKGROUND_TASKS] Pulizia coda watchdog: %d elemento(i) rimosso(i)", role_label, removed_count)
-            else:
-                logger.info("%s [BACKGROUND_TASKS] Pulizia coda watchdog: nessun elemento da rimuovere", role_label)
-        except SyntaxError as e:
-            logger.error("%s [BACKGROUND_TASKS] ❌ [CRITICAL] SyntaxError in watchdog queue: %s - sistema operativo in modalità degradata", role_label, str(e))
-        except ImportError as e:
-            logger.error("%s [BACKGROUND_TASKS] ❌ [CRITICAL] ImportError in watchdog queue: %s - sistema operativo in modalità degradata", role_label, str(e))
-        except Exception as e:
-            logger.error("%s [BACKGROUND_TASKS] Errore caricamento/pulizia coda watchdog: %s", role_label, str(e), exc_info=True)
+        # Task 3: Watchdog queue - LAZY LOADING (non caricare all'avvio, solo quando necessario)
+        # Watchdog queue viene caricata on-demand quando serve accedere alla coda
+        logger.debug("%s [BACKGROUND_TASKS] Watchdog queue: lazy loading (caricata on-demand)", role_label)
         
         logger.info("%s [BACKGROUND_TASKS] Tutti i task iniziali completati", role_label)
         logger.info("%s [HEARTBEAT] Sistema operativo – nessun documento in elaborazione – stato idle", role_label)
@@ -699,7 +679,65 @@ async def shutdown_event():
 
 @app.get("/health", include_in_schema=False)
 def health():
-    return {"status": "ok"}
+    """
+    Endpoint health check - verifica che il server risponda.
+    NON controlla dipendenze (veloce, < 1ms).
+    """
+    return {"status": "ok", "service": "ddt-web"}
+
+
+@app.get("/ready", include_in_schema=False)
+async def ready():
+    """
+    Endpoint readiness check - verifica che le dipendenze siano pronte.
+    Controlla:
+    - Directory inbox scrivibile
+    - Directory excel scrivibile
+    - File Excel accessibile (se esiste)
+    """
+    checks = {
+        "inbox": False,
+        "excel": False,
+        "excel_file": False
+    }
+    
+    try:
+        from app.paths import get_inbox_dir, get_excel_dir, get_excel_file
+        import os
+        
+        # Check inbox
+        inbox_path = get_inbox_dir()
+        if inbox_path.exists() and os.access(inbox_path, os.W_OK):
+            checks["inbox"] = True
+        
+        # Check excel directory
+        excel_dir = get_excel_dir()
+        if excel_dir.exists() and os.access(excel_dir, os.W_OK):
+            checks["excel"] = True
+        
+        # Check excel file (se esiste)
+        excel_file = get_excel_file()
+        if excel_file.exists() and os.access(excel_file, os.R_OK):
+            checks["excel_file"] = True
+        elif not excel_file.exists():
+            # File non esiste ma directory è scrivibile → OK (verrà creato)
+            checks["excel_file"] = True
+        
+    except Exception as e:
+        logger.warning(f"Errore durante readiness check: {e}")
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready", "checks": checks, "error": str(e)}
+        )
+    
+    all_ready = all(checks.values())
+    if all_ready:
+        return {"status": "ready", "checks": checks}
+    else:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready", "checks": checks}
+        )
 
 from app.paths import get_app_dir
 templates = Jinja2Templates(directory=str(get_app_dir() / "templates"))

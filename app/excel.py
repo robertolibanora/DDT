@@ -6,7 +6,7 @@ import os
 import logging
 import threading
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from openpyxl import Workbook, load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 from contextlib import contextmanager
@@ -20,6 +20,11 @@ logger = logging.getLogger(__name__)
 
 # Lock per operazioni thread-safe
 _excel_lock = threading.Lock()
+
+# Cache per read_excel_as_dict (evita riletture continue)
+_excel_cache: Optional[Dict[str, List[Dict[str, Any]]]] = None
+_excel_cache_timestamp: Optional[float] = None
+_excel_cache_lock = threading.Lock()
 
 HEADERS = ["data", "mittente", "destinatario", "numero_documento", "totale_kg"]
 
@@ -140,6 +145,8 @@ def append_to_excel(data: Dict[str, Any]) -> None:
                 excel_file = get_excel_file()
                 wb.save(str(excel_file))
                 logger.info("DDT aggiunto a Excel: %s", ddt_data.numero_documento)
+                # Invalida cache dopo scrittura
+                _invalidate_excel_cache()
             except PermissionError as e:
                 logger.error("Errore: file Excel è aperto da un altro programma")
                 raise IOError("Il file Excel è aperto. Chiudilo e riprova.") from e
@@ -282,6 +289,8 @@ def update_or_append_to_excel(data: Dict[str, Any]) -> bool:
                     logger.info("DDT aggiornato in Excel: %s", ddt_data.numero_documento)
                 else:
                     logger.info("DDT aggiunto a Excel: %s", ddt_data.numero_documento)
+                # Invalida cache dopo scrittura
+                _invalidate_excel_cache()
             except PermissionError as e:
                 logger.error("Errore: file Excel è aperto da un altro programma")
                 raise IOError("Il file Excel è aperto. Chiudilo e riprova.") from e
@@ -306,12 +315,24 @@ def update_or_append_to_excel(data: Dict[str, Any]) -> bool:
         raise ValueError(f"Errore durante il salvataggio: {str(e)}") from e
 
 
-def read_excel_as_dict() -> Dict[str, List[Dict[str, Any]]]:
+def _invalidate_excel_cache() -> None:
+    """Invalida la cache Excel (chiamata dopo scritture)"""
+    global _excel_cache, _excel_cache_timestamp
+    with _excel_cache_lock:
+        _excel_cache = None
+        _excel_cache_timestamp = None
+
+
+def read_excel_as_dict(force_reload: bool = False) -> Dict[str, List[Dict[str, Any]]]:
     """
     Legge tutto il contenuto del file Excel e restituisce un dizionario
+    Usa cache con invalidazione basata su mtime del file per ridurre I/O.
     
     IMPORTANTE: NON maschera OSError/IOError su path critici (excel directory).
     Se la directory non è scrivibile, OSError viene propagato esplicitamente.
+    
+    Args:
+        force_reload: Se True, forza ricaricamento ignorando cache
     
     Returns:
         Dizionario con chiave 'rows' contenente lista di righe
@@ -321,21 +342,49 @@ def read_excel_as_dict() -> Dict[str, List[Dict[str, Any]]]:
         IOError: Se c'è un errore di I/O con il file
         
     Note:
-        Thread-safe, ma non modifica il file
+        Thread-safe, usa cache con invalidazione su mtime
     """
+    global _excel_cache, _excel_cache_timestamp
+    
     # _ensure_excel_exists() può sollevare OSError se directory non scrivibile
     _ensure_excel_exists()
     
+    # Verifica cache se non forzato reload
+    if not force_reload:
+        with _excel_cache_lock:
+            if _excel_cache is not None and _excel_cache_timestamp is not None:
+                try:
+                    from app.paths import get_excel_file
+                    excel_file = get_excel_file()
+                    if excel_file.exists():
+                        file_mtime = excel_file.stat().st_mtime
+                        if _excel_cache_timestamp == file_mtime:
+                            logger.debug("Cache Excel hit: %d righe", len(_excel_cache.get("rows", [])))
+                            return _excel_cache.copy()  # Ritorna copia per thread-safety
+                except Exception:
+                    # Se errore controllo timestamp, ricarica
+                    pass
+    
+    # Cache miss o invalidata: ricarica
     try:
         with _excel_operation():
             try:
                 from app.paths import get_excel_file
-                wb = load_workbook(str(get_excel_file()), data_only=True)
+                excel_file = get_excel_file()
+                wb = load_workbook(str(excel_file), data_only=True)
                 ws = wb.active
             except (InvalidFileException, FileNotFoundError) as e:
                 # File non valido o non trovato: può essere normale se appena creato
                 logger.warning("File Excel non leggibile: %s, restituisco lista vuota", str(e))
-                return {"rows": []}
+                result = {"rows": []}
+                # Aggiorna cache anche per risultato vuoto
+                with _excel_cache_lock:
+                    _excel_cache = result
+                    try:
+                        _excel_cache_timestamp = excel_file.stat().st_mtime if excel_file.exists() else None
+                    except Exception:
+                        _excel_cache_timestamp = None
+                return result
             
             rows = []
             
@@ -371,8 +420,18 @@ def read_excel_as_dict() -> Dict[str, List[Dict[str, Any]]]:
                 
                 rows.append(row_dict)
             
+            result = {"rows": rows}
             logger.debug("Letti %d DDT da Excel (ordinati dal più recente)", len(rows))
-            return {"rows": rows}
+            
+            # Aggiorna cache
+            with _excel_cache_lock:
+                _excel_cache = result.copy()
+                try:
+                    _excel_cache_timestamp = excel_file.stat().st_mtime if excel_file.exists() else None
+                except Exception:
+                    _excel_cache_timestamp = None
+            
+            return result
             
     except (OSError, IOError, PermissionError):
         # Errori di I/O su path critici: propaga esplicitamente senza mascherare
@@ -426,6 +485,8 @@ def clear_all_ddt() -> Dict[str, Any]:
                 from app.paths import get_excel_file
                 wb.save(str(get_excel_file()))
                 logger.info(f"Cancellati {rows_before} DDT dal file Excel")
+                # Invalida cache dopo scrittura
+                _invalidate_excel_cache()
                 return {
                     "success": True,
                     "rows_deleted": rows_before,

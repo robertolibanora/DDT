@@ -249,10 +249,10 @@ def load_layout_rules(force_reload: bool = False) -> Dict[str, LayoutRule]:
                 logger.warning("Errore caricamento regola '%s': %s - skip regola", rule_name, str(e))
                 continue
         
-        # Log esplicito: nomi sender caricati
+        # Log esplicito: nomi sender caricati (solo in DEBUG per ridurre verbosity)
         if sender_counts:
             for sender_norm, count in sender_counts.items():
-                logger.info("Caricate %d layout model(s) per sender: %s", count, sender_norm)
+                logger.debug("Caricate %d layout model(s) per sender: %s", count, sender_norm)
         
         # Aggiorna cache
         _layout_rules_cache = rules
@@ -261,12 +261,12 @@ def load_layout_rules(force_reload: bool = False) -> Dict[str, LayoutRule]:
         except Exception:
             _layout_rules_cache_timestamp = None
         
-        # Log esplicito con lista delle chiavi
+        # Log esplicito con lista delle chiavi (solo in DEBUG per ridurre verbosity)
         rule_keys = list(rules.keys())
         if rule_keys:
-            logger.info("Caricate %d layout rule(s): %s", len(rules), rule_keys)
+            logger.debug("Caricate %d layout rule(s): %s", len(rules), rule_keys)
         else:
-            logger.info("Caricate %d layout rule(s)", len(rules))
+            logger.debug("Caricate %d layout rule(s)", len(rules))
         
         return rules
         

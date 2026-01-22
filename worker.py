@@ -41,6 +41,11 @@ _cleanup_shutdown_flag = threading.Event()
 _queued_processing_shutdown_flag = threading.Event()
 _shutdown_event = threading.Event()  # Event principale per shutdown
 
+# Semaforo per limitare concorrenza processing PDF (evita saturazione CPU/RAM)
+# Default: max 2 PDF processati simultaneamente (configurabile via env var)
+_MAX_CONCURRENT_PDF_PROCESSING = int(os.getenv("DDT_MAX_CONCURRENT_PDF", "2"))
+_pdf_processing_semaphore = threading.Semaphore(_MAX_CONCURRENT_PDF_PROCESSING)
+
 
 class DDTHandler(FileSystemEventHandler):
     """
@@ -54,9 +59,22 @@ class DDTHandler(FileSystemEventHandler):
         
         IMPORTANTE: Questa funzione viene SEMPRE eseguita in thread daemon separato
         per NON bloccare mai il watchdog filesystem. Operazioni pesanti sono accettabili.
+        
+        Usa semaforo per limitare concorrenza e evitare saturazione CPU/RAM.
         """
+        # Flag per tracciare se il semaforo è stato acquisito (evita double-release)
+        acquired = False
+        
+        # Acquisisci semaforo per limitare concorrenza (max _MAX_CONCURRENT_PDF_PROCESSING simultanei)
+        if not _pdf_processing_semaphore.acquire(timeout=300):  # Timeout 5 minuti
+            logger.error(f"❌ [WORKER] [PROCESS_PDF] Timeout acquisizione semaforo per {Path(file_path).name} - troppi PDF in processing")
+            return
+        
+        # Semaforo acquisito con successo
+        acquired = True
+        
         try:
-            logger.info(f"📄 [WORKER] [PROCESS_PDF] Rilevato nuovo PDF: {Path(file_path).name}")
+            logger.debug(f"📄 [WORKER] [PROCESS_PDF] Rilevato nuovo PDF: {Path(file_path).name}")
             
             from app.processed_documents import (
                 calculate_file_hash,
@@ -130,7 +148,7 @@ class DDTHandler(FileSystemEventHandler):
             ai_fallback_fields = data.pop("_ai_fallback_fields", [])  # Estrai ai_fallback_fields dal risultato
             if ai_fallback_used:
                 logger.warning(f"⚠️ [WORKER] [PROCESS_PDF] AI fallback utilizzato: campi={ai_fallback_fields}")
-            logger.info(f"✅ [WORKER] [PROCESS_PDF] Estrazione dati completata: {Path(file_path).name} (mode={extraction_mode}, ai_fallback_used={ai_fallback_used})")
+            logger.debug(f"✅ [WORKER] [PROCESS_PDF] Estrazione dati completata: {Path(file_path).name} (mode={extraction_mode}, ai_fallback_used={ai_fallback_used})")
             
             # Verifica se questo numero documento è già in Excel (controllo finale)
             try:
@@ -163,7 +181,7 @@ class DDTHandler(FileSystemEventHandler):
                 logger.warning(f"⚠️ [WORKER] [PROCESS_PDF] Errore generazione PNG anteprima: {e}")
             
             # Aggiungi alla coda per l'anteprima (con extraction_mode e ai_fallback_used)
-            logger.info(f"📋 [WORKER] [PROCESS_PDF] Aggiunta alla coda watchdog: {Path(file_path).name}")
+            logger.debug(f"📋 [WORKER] [PROCESS_PDF] Aggiunta alla coda watchdog: {Path(file_path).name}")
             queue_id = add_to_queue(file_path, data, pdf_base64, doc_hash, extraction_mode, ai_fallback_used=ai_fallback_used, ai_fallback_fields=ai_fallback_fields)
             logger.info(f"✅ [WORKER] [PROCESS_PDF] DDT aggiunto alla coda: queue_id={queue_id} hash={doc_hash[:16]}... numero={data.get('numero_documento', 'N/A')}")
             
@@ -171,7 +189,7 @@ class DDTHandler(FileSystemEventHandler):
             # Questo permette alla dashboard di distinguere PROCESSING (tecnico) da READY_FOR_REVIEW (funzionale)
             from app.processed_documents import mark_document_ready
             mark_document_ready(doc_hash, queue_id, extraction_mode)
-            logger.info(f"✅ [WORKER] [PROCESS_PDF] Documento READY_FOR_REVIEW: hash={doc_hash[:16]}... numero={data.get('numero_documento', 'N/A')} extraction_mode={extraction_mode or 'N/A'}")
+            logger.debug(f"✅ [WORKER] [PROCESS_PDF] Documento READY_FOR_REVIEW: hash={doc_hash[:16]}... numero={data.get('numero_documento', 'N/A')} extraction_mode={extraction_mode or 'N/A'}")
             
         except ValueError as e:
             logger.error(f"❌ [WORKER] [PROCESS_PDF] Errore validazione DDT: {e}")
@@ -186,7 +204,13 @@ class DDTHandler(FileSystemEventHandler):
             if 'doc_hash' in locals():
                 mark_document_error(doc_hash, f"Errore parsing: {str(e)}")
         finally:
-            logger.info(f"🏁 [WORKER] [PROCESS_PDF] Processing completato: {Path(file_path).name}")
+            logger.debug(f"🏁 [WORKER] [PROCESS_PDF] Processing completato: {Path(file_path).name}")
+            # Rilascia semaforo solo se acquisito (evita double-release)
+            if acquired:
+                _pdf_processing_semaphore.release()
+                logger.debug(f"🔓 [WORKER] [PROCESS_PDF] Semaforo rilasciato per {Path(file_path).name}")
+            else:
+                logger.debug(f"⚠️ [WORKER] [PROCESS_PDF] Semaforo non rilasciato (non acquisito) per {Path(file_path).name}")
     
     def on_created(self, event):
         """
@@ -405,6 +429,8 @@ def process_queued_document(doc_info: Dict[str, Any]) -> None:
     IMPORTANTE: Questa funzione viene SEMPRE eseguita in thread daemon separato
     per NON bloccare mai il loop principale. Operazioni pesanti sono accettabili.
     
+    Usa semaforo per limitare concorrenza e evitare saturazione CPU/RAM.
+    
     Args:
         doc_info: Dizionario con informazioni del documento QUEUED (hash, file_path, file_name)
     """
@@ -415,6 +441,17 @@ def process_queued_document(doc_info: Dict[str, Any]) -> None:
     if not doc_hash or not file_path:
         logger.warning(f"⚠️ [WORKER] [PROCESS_QUEUED] Informazioni documento incomplete: hash={doc_hash}, path={file_path}")
         return
+    
+    # Flag per tracciare se il semaforo è stato acquisito (evita double-release)
+    acquired = False
+    
+    # Acquisisci semaforo per limitare concorrenza (max _MAX_CONCURRENT_PDF_PROCESSING simultanei)
+    if not _pdf_processing_semaphore.acquire(timeout=300):  # Timeout 5 minuti
+        logger.error(f"❌ [WORKER] [PROCESS_QUEUED] Timeout acquisizione semaforo per {file_name} - troppi PDF in processing")
+        return
+    
+    # Semaforo acquisito con successo
+    acquired = True
     
     try:
         logger.info(f"📄 [WORKER] [PROCESS_QUEUED] Processing started: hash={doc_hash[:16]}... file={file_name}")
@@ -531,7 +568,13 @@ def process_queued_document(doc_info: Dict[str, Any]) -> None:
         logger.error(f"❌ [WORKER] [PROCESS_QUEUED] Errore nel parsing DDT: {e}", exc_info=True)
         mark_document_error(doc_hash, f"Errore parsing: {str(e)}")
     finally:
-        logger.info(f"🏁 [WORKER] [PROCESS_QUEUED] Processing completato: hash={doc_hash[:16]}... file={file_name}")
+        logger.debug(f"🏁 [WORKER] [PROCESS_QUEUED] Processing completato: hash={doc_hash[:16]}... file={file_name}")
+        # Rilascia semaforo solo se acquisito (evita double-release)
+        if acquired:
+            _pdf_processing_semaphore.release()
+            logger.debug(f"🔓 [WORKER] [PROCESS_QUEUED] Semaforo rilasciato per {file_name}")
+        else:
+            logger.debug(f"⚠️ [WORKER] [PROCESS_QUEUED] Semaforo non rilasciato (non acquisito) per {file_name}")
 
 
 def queued_processing_loop():
@@ -600,25 +643,10 @@ def init_background_tasks():
         logger.error(f"❌ [WORKER] [BACKGROUND_TASKS] Errore migrazione stati: {e}", exc_info=True)
     
     try:
-        # Carica layout models all'avvio per loggare disponibilità
-        logger.info("📐 [WORKER] [BACKGROUND_TASKS] Avvio caricamento layout models...")
-        from app.layout_rules.manager import load_layout_rules
-        rules = load_layout_rules()
-        if rules:
-            logger.info(f"✅ [WORKER] [BACKGROUND_TASKS] Layout models disponibili: {len(rules)} modello(i)")
-            # Log per mittente
-            from app.layout_rules.manager import normalize_sender
-            sender_counts = {}
-            for rule_name, rule in rules.items():
-                supplier = rule.match.supplier
-                sender_norm = normalize_sender(supplier)
-                sender_counts[sender_norm] = sender_counts.get(sender_norm, 0) + 1
-            for sender_norm, count in sender_counts.items():
-                logger.info(f"   📦 [WORKER] [BACKGROUND_TASKS] Loaded {count} layout model(s) for sender: {sender_norm}")
-        else:
-            logger.info("✅ [WORKER] [BACKGROUND_TASKS] Nessun layout model disponibile")
+        # Layout models - LAZY LOADING (non caricare all'avvio, solo quando necessario)
+        logger.debug("📐 [WORKER] [BACKGROUND_TASKS] Layout models: lazy loading (caricati on-demand)")
     except Exception as e:
-        logger.error(f"❌ [WORKER] [BACKGROUND_TASKS] Errore caricamento layout models: {e}", exc_info=True)
+        logger.error(f"❌ [WORKER] [BACKGROUND_TASKS] Errore setup layout models: {e}", exc_info=True)
     
     try:
         # Esegui un controllo iniziale all'avvio (in background)
@@ -633,17 +661,10 @@ def init_background_tasks():
         logger.error(f"❌ [WORKER] [BACKGROUND_TASKS] Errore controllo iniziale STUCK: {e}", exc_info=True)
     
     try:
-        # Carica e pulisci coda watchdog (in background)
-        logger.info("📋 [WORKER] [BACKGROUND_TASKS] Avvio caricamento e pulizia coda watchdog...")
-        from app.watchdog_queue import _load_queue, cleanup_old_items
-        _load_queue()
-        removed_count = cleanup_old_items()
-        if removed_count > 0:
-            logger.info(f"✅ [WORKER] [BACKGROUND_TASKS] Pulizia coda watchdog: {removed_count} elemento(i) rimosso(i)")
-        else:
-            logger.info("✅ [WORKER] [BACKGROUND_TASKS] Pulizia coda watchdog: nessun elemento da rimuovere")
+        # Watchdog queue - LAZY LOADING (non caricare all'avvio, solo quando necessario)
+        logger.debug("📋 [WORKER] [BACKGROUND_TASKS] Watchdog queue: lazy loading (caricata on-demand)")
     except Exception as e:
-        logger.error(f"❌ [WORKER] [BACKGROUND_TASKS] Errore caricamento/pulizia coda watchdog: {e}", exc_info=True)
+        logger.error(f"❌ [WORKER] [BACKGROUND_TASKS] Errore setup watchdog queue: {e}", exc_info=True)
     
     logger.info("✅ [WORKER] [BACKGROUND_TASKS] Tutti i task iniziali completati")
 
