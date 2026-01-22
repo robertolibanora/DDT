@@ -89,6 +89,23 @@
             message.classList.add('hidden');
         }
 
+        /**
+         * Estrae un messaggio di errore leggibile da un oggetto error
+         * Gestisce Error, oggetti JSON con detail/error, e Response non parsate
+         */
+        function getReadableError(error) {
+            if (!error) return "Errore sconosciuto";
+            if (typeof error === "string") return error;
+            if (error.detail) return error.detail;
+            if (error.message) return error.message;
+            if (error.error) return error.error;
+            try {
+                return JSON.stringify(error);
+            } catch {
+                return "Errore imprevisto durante l'anteprima";
+            }
+        }
+
         function formatFileSize(bytes) {
             if (bytes === 0) return '0 Bytes';
             const k = 1024;
@@ -314,7 +331,7 @@
                             dropzone.style.display = 'flex';
                         } catch (modalError) {
                             console.error('Errore durante show modal:', modalError);
-                            showMessage('Errore durante la visualizzazione dell\'anteprima: ' + modalError.message, 'error');
+                            showMessage('Errore durante la visualizzazione dell\'anteprima: ' + getReadableError(modalError), 'error');
                         }
                     } else {
                         console.error('previewModal non disponibile o show non è una funzione:', {
@@ -329,12 +346,14 @@
                 }
 
             } catch (error) {
-                // Log solo se non è network error
-                if (!error.isNetworkError) {
-                    console.error('Errore upload:', error);
+                // Log tecnico completo in console
+                console.error('Errore upload:', error);
+                if (error.stack) {
                     console.error('Stack:', error.stack);
                 }
-                showMessage(`Errore: ${error.message}`, 'error');
+                // Mostra messaggio leggibile all'utente
+                const readableError = getReadableError(error);
+                showMessage(`Errore: ${readableError}`, 'error');
             } finally {
                 submitBtn.disabled = false;
                 submitBtn.dataset.loading = 'false';

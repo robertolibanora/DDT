@@ -200,8 +200,19 @@ async function apiPostForm(url, formData) {
     }
     
     if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        const error = new Error(errorData.detail || `Errore ${response.status}: ${response.statusText}`);
+        let errorData = {};
+        try {
+            errorData = await response.json();
+        } catch (parseError) {
+            // Se il JSON non può essere parsato, usa statusText
+            errorData = {};
+        }
+        // Estrai messaggio con priorità: detail > error > statusText
+        const errorMessage = errorData.detail || errorData.error || `Errore ${response.status}: ${response.statusText}`;
+        const error = new Error(errorMessage);
+        // Copia eventuali proprietà aggiuntive dall'errore
+        if (errorData.detail) error.detail = errorData.detail;
+        if (errorData.error) error.error = errorData.error;
         if (response.status >= 502 && response.status < 600) {
             error.isNetworkError = true;
         }
