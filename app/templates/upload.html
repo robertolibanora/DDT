@@ -265,8 +265,9 @@
                     console.log('Dati validi, verifico modal...');
                     console.log('window.previewModal:', window.previewModal);
                     
-                    // Verifica se il documento è in stato QUEUED (nessun extracted_data)
-                    if (data.status === 'QUEUED' || !data.extracted_data) {
+                    // GUARDIA LOGICA: Se il documento è in stato QUEUED, NON mostrare anteprima
+                    // L'anteprima sarà disponibile solo dopo il processing del WORKER
+                    if (data.status === 'QUEUED') {
                         // Documento in coda per elaborazione
                         showMessage('✅ File caricato con successo. Il documento è in coda per l\'elaborazione. L\'anteprima sarà disponibile a breve.', 'success');
                         
@@ -275,25 +276,16 @@
                         fileInfo.classList.add('hidden');
                         dropzone.style.display = 'flex';
                         
-                        // Opzionalmente, mostra il modal con stato QUEUED
-                        await ensureModalReady();
-                        if (window.previewModal && typeof window.previewModal.show === 'function') {
-                            try {
-                                window.previewModal.show(
-                                    null, // extractedData = null per QUEUED
-                                    null, // pdfBase64 = null (non ancora disponibile)
-                                    data.file_hash,
-                                    data.file_name,
-                                    null, // extractionMode
-                                    false, // suggestCreateLayout
-                                    null,  // hasLayoutModel
-                                    false, // aiFallbackUsed
-                                    []     // aiFallbackFields
-                                );
-                            } catch (modalError) {
-                                console.error('Errore durante show modal QUEUED:', modalError);
-                            }
-                        }
+                        // Uscita immediata: NON chiamare previewModal.show() per QUEUED
+                        return;
+                    }
+                    
+                    // Verifica se mancano dati estratti (caso non-QUEUED ma senza extracted_data)
+                    if (!data.extracted_data) {
+                        showMessage('⚠️ Dati estratti non disponibili. Il documento potrebbe essere ancora in elaborazione.', 'info');
+                        form.reset();
+                        fileInfo.classList.add('hidden');
+                        dropzone.style.display = 'flex';
                         return;
                     }
                     
