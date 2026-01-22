@@ -3,7 +3,6 @@ import socket
 import threading
 import logging
 import sys
-import signal
 from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, UploadFile, File, Request, HTTPException, Form, Depends
@@ -193,27 +192,6 @@ def stop_cleanup_thread_safely():
         logger.info("✅ [STOP_CLEANUP] Cleanup completato")
 
 
-def handle_shutdown_signal(sig, frame):
-    """
-    Gestisce SIGTERM/SIGINT per shutdown pulito del processo WEB.
-    
-    IMPORTANTE: Nel WEB non ci sono background task persistenti, quindi
-    possiamo terminare immediatamente. Uvicorn gestirà il cleanup dell'event loop.
-    """
-    logger.info(f"🛑 [SHUTDOWN_SIGNAL] Segnale di shutdown ricevuto: {sig}")
-    logger.info("🛑 [SHUTDOWN_SIGNAL] Terminazione processo WEB...")
-    # Uvicorn gestirà il cleanup, noi terminiamo il processo
-    sys.exit(0)
-
-
-# Registra handler per SIGTERM e SIGINT (solo per WEB, worker.py gestisce i suoi segnali)
-# IMPORTANTE: Registra PRIMA di creare l'app FastAPI per garantire shutdown pulito
-if IS_WEB_ROLE:
-    signal.signal(signal.SIGTERM, handle_shutdown_signal)
-    signal.signal(signal.SIGINT, handle_shutdown_signal)
-    logger.debug("[WEB] Handler segnali SIGTERM/SIGINT registrati")
-
-                            
 def get_local_ip():
     """Ottiene l'IP locale della macchina"""
     try:
@@ -681,8 +659,7 @@ async def shutdown_event():
     Ferma watchdog e cleanup thread senza bloccare (SOLO se DDT_ROLE=worker).
     
     IMPORTANTE: Nel WEB non ci sono background task da fermare, quindi questo handler
-    è principalmente per il WORKER. I segnali SIGTERM/SIGINT sono gestiti esplicitamente
-    tramite handle_shutdown_signal() per garantire shutdown pulito.
+    è principalmente per il WORKER. Uvicorn gestisce automaticamente SIGTERM/SIGINT.
     """
     role_label = "[WEB]" if IS_WEB_ROLE else "[WORKER]"
     logger.critical(f"{role_label} [SHUTDOWN] Shutdown richiesto, arresto thread/observer...")
