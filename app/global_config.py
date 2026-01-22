@@ -264,25 +264,61 @@ def ensure_config_file() -> None:
     - Chiamata SOLO all'avvio applicazione (lifespan startup)
     - MAI chiamata da endpoint GET
     - Usa lock esclusivo per creazione atomica cross-process
+    - NON blocca MAI lo startup: gestisce TimeoutError come caso non critico
     
     IMPORTANTE: Chiamare questa funzione UNA SOLA VOLTA all'avvio.
+    NON solleva MAI eccezioni per non bloccare lo startup.
     """
     global _config_cache
     
     pid = os.getpid()
     
-    # File locking esclusivo per creazione atomica
+    # Se il file esiste, tenta solo di caricarlo (read-only, non bloccante)
+    if CONFIG_FILE.exists():
+        try:
+            _load_config()
+            logger.debug(
+                f"File configurazione globale esistente: {CONFIG_FILE} "
+                f"(PID={pid})"
+            )
+            return
+        except Exception as e:
+            # Se il caricamento fallisce, log warning ma continua startup
+            logger.warning(
+                f"Impossibile caricare config esistente (continuerà con default): {e} "
+                f"(PID={pid}, path={CONFIG_FILE})"
+            )
+            # Inizializza cache con default in memoria (non blocca startup)
+            _config_cache = {
+                "active_output_date": _get_default_output_date(),
+                "last_updated": datetime.now().isoformat()
+            }
+            return
+    
+    # File NON esiste: tenta creazione con lock esclusivo (timeout breve)
     try:
-        with file_lock(CONFIG_FILE, exclusive=True, timeout=3.0):
+        # Timeout breve (1s) per non bloccare startup se WORKER tiene il lock
+        with file_lock(CONFIG_FILE, exclusive=True, timeout=1.0):
             with _config_lock:
+                # Double-check: file potrebbe essere stato creato da altro processo
                 if CONFIG_FILE.exists():
-                    # File già esiste, carica normalmente (read-only)
-                    _load_config()
-                    logger.debug(
-                        f"File configurazione globale esistente: {CONFIG_FILE} "
-                        f"(PID={pid})"
-                    )
-                    return
+                    try:
+                        _load_config()
+                        logger.debug(
+                            f"File configurazione globale creato da altro processo: {CONFIG_FILE} "
+                            f"(PID={pid})"
+                        )
+                        return
+                    except Exception as e:
+                        logger.warning(
+                            f"Impossibile caricare config dopo lock (continuerà con default): {e} "
+                            f"(PID={pid}, path={CONFIG_FILE})"
+                        )
+                        _config_cache = {
+                            "active_output_date": _get_default_output_date(),
+                            "last_updated": datetime.now().isoformat()
+                        }
+                        return
                 
                 # File non esiste, crealo con valori default
                 logger.info(
@@ -299,8 +335,6 @@ def ensure_config_file() -> None:
                 }
                 
                 # Salva il file iniziale (sotto lock esclusivo già acquisito)
-                # Nota: _save_config() acquisirà il suo lock, ma siamo già dentro
-                # un lock esclusivo, quindi va bene (lock annidati OK per stesso processo)
                 temp_file = CONFIG_FILE.with_suffix('.json.tmp')
                 
                 with safe_open(temp_file, 'w', encoding='utf-8') as f:
@@ -318,16 +352,28 @@ def ensure_config_file() -> None:
                     f"active_output_date={default_config['active_output_date']} "
                     f"(PID={pid}, path={CONFIG_FILE})"
                 )
-    except TimeoutError as e:
-        logger.error(
-            f"Timeout acquisizione lock per inizializzazione config "
+    except TimeoutError:
+        # Lock occupato: NON bloccare startup, log WARNING e continua
+        logger.warning(
+            f"Lock occupato su {CONFIG_FILE} durante startup (WORKER potrebbe tenerlo). "
+            f"Continuerà con valori default in memoria. "
+            f"Config verrà caricata al primo accesso. (PID={pid})"
+        )
+        # Inizializza cache con default in memoria (non blocca startup)
+        _config_cache = {
+            "active_output_date": _get_default_output_date(),
+            "last_updated": datetime.now().isoformat()
+        }
+        # NON rilanciare eccezione: startup può continuare
+    except Exception as e:
+        # Altri errori: log WARNING ma NON bloccare startup
+        logger.warning(
+            f"Errore inizializzazione configurazione globale (continuerà con default): {e} "
             f"(PID={pid}, path={CONFIG_FILE})"
         )
-        raise
-    except Exception as e:
-        logger.error(
-            f"Errore inizializzazione configurazione globale: {e} "
-            f"(PID={pid}, path={CONFIG_FILE})",
-            exc_info=True
-        )
-        raise
+        # Inizializza cache con default in memoria (non blocca startup)
+        _config_cache = {
+            "active_output_date": _get_default_output_date(),
+            "last_updated": datetime.now().isoformat()
+        }
+        # NON rilanciare eccezione: startup può continuare
