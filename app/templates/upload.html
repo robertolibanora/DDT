@@ -247,19 +247,39 @@
             });
         }
 
+        // 🔍 DIAGNOSI: Handler per unhandled promise rejections
+        window.addEventListener('unhandledrejection', (event) => {
+            console.group('🔥 UNHANDLED PROMISE REJECTION');
+            console.error('Reason:', event.reason);
+            console.log('typeof reason:', typeof event.reason);
+            console.log('instanceof Error:', event.reason instanceof Error);
+            console.log('constructor:', event.reason?.constructor?.name);
+            console.log('raw reason:', event.reason);
+            console.log('string:', String(event.reason));
+            console.log('keys:', Object.keys(event.reason || {}));
+            console.trace('STACK TRACE');
+            console.groupEnd();
+        });
+
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             
+            console.log('STEP 1: Click su "Estrai e Anteprima"');
+            
             // Prevenzione doppi submit: se già in loading, ignora
             if (submitBtn.disabled || submitBtn.dataset.loading === 'true') {
+                console.log('STEP 1.1: Submit già in corso, ignoro');
                 return;
             }
             
             const file = fileInput.files[0];
             if (!file) {
+                console.log('STEP 1.2: Nessun file selezionato');
                 showMessage('Seleziona un file prima di caricare', 'error');
                 return;
             }
+
+            console.log('STEP 2: File selezionato:', file.name);
 
             // Mostra stato di caricamento (prevenzione doppi submit)
             submitBtn.disabled = true;
@@ -271,11 +291,32 @@
             const formData = new FormData();
             formData.append('file', file);
 
-            try {
-                const data = await apiPostForm('/upload', formData);
+            console.log('STEP 3: Prima chiamata upload API');
 
-                console.log('Dati ricevuti:', {
+            try {
+                let data;
+                try {
+                    data = await apiPostForm('/upload', formData);
+                    console.log('STEP 3.1: apiPostForm completato senza errori');
+                } catch (apiError) {
+                    console.group('🔥 DIAGNOSI ERRORE API');
+                    console.error('STEP 3.2: Errore da apiPostForm:', apiError);
+                    console.log('typeof:', typeof apiError);
+                    console.log('instanceof Error:', apiError instanceof Error);
+                    console.log('constructor:', apiError?.constructor?.name);
+                    console.log('raw error:', apiError);
+                    console.log('string:', String(apiError));
+                    console.log('keys:', Object.keys(apiError || {}));
+                    console.trace('STACK TRACE');
+                    console.groupEnd();
+                    throw apiError; // Rilancia per essere catturato dal catch principale
+                }
+                
+                console.log('STEP 4: Dopo risposta upload API, tipo data:', typeof data);
+
+                console.log('STEP 4.1: Dati ricevuti:', {
                     success: data.success,
+                    status: data.status,
                     has_extracted_data: !!data.extracted_data,
                     has_pdf_base64: !!data.pdf_base64,
                     pdf_base64_length: data.pdf_base64 ? data.pdf_base64.length : 0,
@@ -285,12 +326,13 @@
 
                 // Mostra anteprima - il salvataggio avviene solo dopo conferma nel modal
                 if (data.success) {
-                    console.log('Dati validi, verifico modal...');
+                    console.log('STEP 5: data.success === true, verifico modal...');
                     console.log('window.previewModal:', window.previewModal);
                     
                     // GUARDIA LOGICA: Se il documento è in stato QUEUED, NON mostrare anteprima
                     // L'anteprima sarà disponibile solo dopo il processing del WORKER
                     if (data.status === 'QUEUED') {
+                        console.log('STEP 5.1: RAMO QUEUED - uscita immediata');
                         // Documento in coda per elaborazione
                         showMessage('✅ File caricato con successo. Il documento è in coda per l\'elaborazione. L\'anteprima sarà disponibile a breve.', 'success');
                         
@@ -299,12 +341,14 @@
                         fileInfo.classList.add('hidden');
                         dropzone.style.display = 'flex';
                         
+                        console.log('STEP 5.2: RETURN da ramo QUEUED');
                         // Uscita immediata: NON chiamare previewModal.show() per QUEUED
                         return;
                     }
                     
                     // Verifica se mancano dati estratti (caso non-QUEUED ma senza extracted_data)
                     if (!data.extracted_data) {
+                        console.log('STEP 5.3: Nessun extracted_data, uscita');
                         showMessage('⚠️ Dati estratti non disponibili. Il documento potrebbe essere ancora in elaborazione.', 'info');
                         form.reset();
                         fileInfo.classList.add('hidden');
@@ -312,14 +356,15 @@
                         return;
                     }
                     
+                    console.log('STEP 6: Prima di ensureModalReady');
                     // Assicurati che il modal sia pronto
                     await ensureModalReady();
                     
-                    console.log('Dopo ensureModalReady, window.previewModal:', window.previewModal);
+                    console.log('STEP 7: Dopo ensureModalReady, window.previewModal:', window.previewModal);
                     
                     // Verifica che il modal sia disponibile
                     if (window.previewModal && typeof window.previewModal.show === 'function') {
-                        console.log('Chiamo previewModal.show con:', {
+                        console.log('STEP 8: Prima di previewModal.show con:', {
                             extracted_data: data.extracted_data,
                             pdf_base64_length: data.pdf_base64 ? data.pdf_base64.length : 0,
                             file_hash: data.file_hash,
@@ -327,6 +372,7 @@
                         });
                         
                         try {
+                            console.log('STEP 8.1: Chiamata previewModal.show()');
                             window.previewModal.show(
                                 data.extracted_data || null, // Gestisce undefined/null
                                 data.pdf_base64 || null,
@@ -338,17 +384,28 @@
                                 data.ai_fallback_used || false,
                                 data.ai_fallback_fields || []
                             );
-                            console.log('Modal.show chiamato con successo');
+                            console.log('STEP 9: Modal.show chiamato con successo');
                             
                             // Reset form dopo aver mostrato il modal
                             form.reset();
                             fileInfo.classList.add('hidden');
                             dropzone.style.display = 'flex';
                         } catch (modalError) {
-                            console.error('Errore durante show modal:', modalError);
+                            console.group('🔥 DIAGNOSI ERRORE MODAL');
+                            console.error('STEP 8.2: Errore durante show modal:', modalError);
+                            console.log('typeof:', typeof modalError);
+                            console.log('instanceof Error:', modalError instanceof Error);
+                            console.log('constructor:', modalError?.constructor?.name);
+                            console.log('raw error:', modalError);
+                            console.log('string:', String(modalError));
+                            console.log('keys:', Object.keys(modalError || {}));
+                            console.log('getReadableError:', getReadableError(modalError));
+                            console.trace('STACK TRACE');
+                            console.groupEnd();
                             showMessage('Errore durante la visualizzazione dell\'anteprima: ' + getReadableError(modalError), 'error');
                         }
                     } else {
+                        console.log('STEP 8.3: previewModal non disponibile');
                         console.error('previewModal non disponibile o show non è una funzione:', {
                             previewModal: window.previewModal,
                             hasShow: window.previewModal ? typeof window.previewModal.show : 'N/A'
@@ -356,20 +413,33 @@
                         showMessage('Errore: modal di anteprima non disponibile. Ricarica la pagina.', 'error');
                     }
                 } else {
+                    console.log('STEP 5.4: data.success è false');
                     console.error('data.success è false:', data);
                     showMessage('Errore: impossibile mostrare l\'anteprima', 'error');
                 }
 
             } catch (error) {
-                // Log tecnico completo in console
+                // 🔍 DIAGNOSI: Log tecnico completo in console
+                console.group('🔥 DIAGNOSI ERRORE UPLOAD');
                 console.error('Errore upload:', error);
+                console.log('typeof:', typeof error);
+                console.log('instanceof Error:', error instanceof Error);
+                console.log('constructor:', error?.constructor?.name);
+                console.log('raw error:', error);
+                console.log('string:', String(error));
+                console.log('keys:', Object.keys(error || {}));
+                console.log('getReadableError:', getReadableError(error));
                 if (error.stack) {
                     console.error('Stack:', error.stack);
                 }
+                console.trace('STACK TRACE');
+                console.groupEnd();
+                
                 // Mostra messaggio leggibile all'utente
                 const readableError = getReadableError(error);
                 showMessage(`Errore: ${readableError}`, 'error');
             } finally {
+                console.log('STEP FINAL: finally block eseguito');
                 submitBtn.disabled = false;
                 submitBtn.dataset.loading = 'false';
                 btnText.textContent = 'Estrai e Anteprima';
