@@ -111,10 +111,7 @@
 
         async function loadRules() {
             try {
-                const res = await fetch('/api/rules', {
-                    credentials: 'include'
-                });
-                const data = await res.json();
+                const data = await apiGet('/api/rules');
                 rules = data.rules || {};
                 // Salva le regole automatiche globalmente per il rendering
                 window.autoRules = data.auto_rules || [];
@@ -219,22 +216,10 @@
             try {
                 const isEdit = document.getElementById('rule-name-input').value !== '';
                 const url = isEdit ? `/api/rules/${name}` : '/api/rules/add';
-                const method = isEdit ? 'PUT' : 'POST';
                 
                 const payload = isEdit ? ruleData : { name: name, rule: ruleData };
 
-                const res = await fetch(url, {
-                    method: method,
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload),
-                    credentials: 'include'
-                });
-
-                const data = await res.json();
-
-                if (!res.ok) {
-                    throw new Error(data.detail || 'Errore durante il salvataggio');
-                }
+                const data = isEdit ? await apiPut(url, payload) : await apiPost('/api/rules/add', { name: name, rule: ruleData });
 
                 showMessage(`Regola '${name}' salvata con successo!`);
                 document.getElementById('rule-modal').classList.add('hidden');
@@ -251,16 +236,7 @@
             }
 
             try {
-                const res = await fetch(`/api/rules/${name}`, {
-                    method: 'DELETE',
-                    credentials: 'include'
-                });
-
-                const data = await res.json();
-
-                if (!res.ok) {
-                    throw new Error(data.detail || 'Errore durante l\'eliminazione');
-                }
+                const data = await apiDelete(`/api/rules/${name}`);
 
                 showMessage(`Regola '${name}' eliminata con successo!`);
                 await loadRules();
@@ -286,18 +262,7 @@
                 btn.textContent = 'Riprocessamento...';
                 resultDiv.classList.add('hidden');
 
-                const res = await fetch(`/reprocess/${encodeURIComponent(docNumber)}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ numero_documento: docNumber }),
-                    credentials: 'include'
-                });
-
-                const data = await res.json();
-
-                if (!res.ok) {
-                    throw new Error(data.detail || 'Errore durante il reprocessing');
-                }
+                const data = await apiPost(`/reprocess/${encodeURIComponent(docNumber)}`, { numero_documento: docNumber });
 
                 resultDiv.innerHTML = `
                     <div class="message success">

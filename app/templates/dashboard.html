@@ -193,15 +193,7 @@
             }
             
             try {
-                const res = await fetch("/data", {
-                    credentials: 'include'
-                });
-                
-                if (!res.ok) {
-                    throw new Error(`Errore ${res.status}: ${res.statusText}`);
-                }
-                
-                const data = await res.json();
+                const data = await apiGet("/data");
                 
                 // REGOLA FERREA: Il backend garantisce sempre una struttura completa
                 // Non facciamo controlli tipo if (!data) return che bloccano la UX
@@ -517,16 +509,7 @@
                 clearBtn.disabled = true;
                 clearBtn.textContent = '⏳ Cancellazione...';
                 
-                const response = await fetch('/data/clear', {
-                    method: 'POST',
-                    credentials: 'include'
-                });
-                
-                const data = await response.json();
-                
-                if (!response.ok) {
-                    throw new Error(data.detail || 'Errore durante la cancellazione');
-                }
+                const data = await apiPost('/data/clear');
                 
                 // Mostra messaggio di successo
                 showError(`${data.message || 'Tutti i DDT sono stati cancellati con successo'}`);
@@ -556,12 +539,7 @@
          */
         async function loadOutputDate() {
             try {
-                const response = await fetch('/api/config/output-date', {
-                    credentials: 'include'
-                });
-                
-                // REGOLA FERREA: Gestisci anche response non-ok con struttura completa
-                const data = await response.json();
+                const data = await apiGet('/api/config/output-date');
                 
                 // Il backend garantisce sempre una struttura completa
                 // Usa data.output_date anche se success è false (fallback)
@@ -660,15 +638,9 @@
                 const formData = new FormData();
                 formData.append('output_date', dateStr);
                 
-                const response = await fetch('/api/config/output-date', {
-                    method: 'POST',
-                    body: formData,
-                    credentials: 'include'
-                });
+                const data = await apiPostForm('/api/config/output-date', formData);
                 
-                const data = await response.json();
-                
-                if (response.ok && data.success) {
+                if (data.success) {
                     // Aggiorna visualizzazione
                     currentOutputDate = dateStr;
                     await loadOutputDate();
@@ -736,12 +708,8 @@
          */
         async function updatePendingDocumentsBanner() {
             try {
-                const response = await fetch('/api/pending-documents-count', {
-                    credentials: 'include'
-                });
-                
                 // REGOLA FERREA: Il backend garantisce sempre una struttura completa
-                const data = await response.json();
+                const data = await apiGet('/api/pending-documents-count');
                 
                 // Normalizza count a 0 se mancante o non valido
                 pendingDocumentsCount = (data?.count !== undefined && data.count !== null) ? parseInt(data.count) || 0 : 0;
@@ -793,12 +761,8 @@
             }
             
             try {
-                const response = await fetch('/api/watchdog-queue', {
-                    credentials: 'include'
-                });
-                
                 // REGOLA FERREA: Il backend garantisce sempre una struttura completa
-                const data = await response.json();
+                const data = await apiGet('/api/watchdog-queue');
                 
                 // Normalizza items a array vuoto se mancante o non valido
                 const items = Array.isArray(data?.items) ? data.items : [];
@@ -914,12 +878,8 @@
             }
             
             try {
-                const response = await fetch('/api/watchdog-queue', {
-                    credentials: 'include'
-                });
-                
                 // REGOLA FERREA: Il backend garantisce sempre una struttura completa
-                const data = await response.json();
+                const data = await apiGet('/api/watchdog-queue');
                 
                 // Normalizza items a array vuoto se mancante o non valido
                 const items = Array.isArray(data?.items) ? data.items : [];
@@ -949,7 +909,7 @@
                 );
                 
                 // Log warning solo se c'è un errore reale (non fallback gestito)
-                if (data?.error && !response.ok) {
+                if (data?.error) {
                     console.warn('Errore apertura coda watchdog (fallback gestito):', data.error_message || data.error);
                 }
             } catch (error) {

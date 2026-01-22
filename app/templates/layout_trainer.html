@@ -189,15 +189,9 @@
                 const formData = new FormData();
                 formData.append('file', file);
                 
-                const response = await fetch('/api/layout/upload-preview', {
-                    method: 'POST',
-                    body: formData,
-                    credentials: 'include'
-                });
+                const data = await apiPostForm('/api/layout/upload-preview', formData);
                 
-                const data = await response.json();
-                
-                if (response.ok && data.success) {
+                if (data.success) {
                     // Carica l'immagine nel canvas
                     loadImageFromUrl(data.image_url, data.file_hash);
                     showMessage(`✅ File caricato: ${data.file_name}`, 'success');
@@ -299,15 +293,9 @@
             formData.append('fields', JSON.stringify(fields));
             
             try {
-                const response = await fetch('/api/layout/rules/save', {
-                    method: 'POST',
-                    body: formData,
-                    credentials: 'include'
-                });
+                const data = await apiPostForm('/api/layout/rules/save', formData);
                 
-                const data = await response.json();
-                
-                if (response.ok && data.success) {
+                if (data.success) {
                     showMessage(`✅ Layout salvato con successo: ${ruleNameInput}`, 'success');
                     setTimeout(() => {
                         window.location.href = '/models';

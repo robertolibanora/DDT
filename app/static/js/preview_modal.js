@@ -300,15 +300,7 @@ class PreviewModal {
                 params.append('page_count', pageCount);
             }
             
-            const response = await fetch(`/preview/detect-model?${params}`, {
-                credentials: 'include'
-            });
-            
-            if (!response.ok) {
-                throw new Error(`Errore ${response.status}`);
-            }
-            
-            const data = await response.json();
+            const data = await apiGet(`/preview/detect-model?${params}`);
             
             if (data.success) {
                 this.availableModels = data.available_models || [];
@@ -395,17 +387,7 @@ class PreviewModal {
             formData.append('file_hash', this.currentFileHash);
             formData.append('model_id', modelId);
             
-            const response = await fetch('/preview/apply-model', {
-                method: 'POST',
-                body: formData,
-                credentials: 'include'
-            });
-            
-            if (!response.ok) {
-                throw new Error(`Errore ${response.status}`);
-            }
-            
-            const data = await response.json();
+            const data = await apiPostForm('/preview/apply-model', formData);
             
             if (data.success) {
                 // Aggiorna i dati estratti con quelli del modello applicato
@@ -836,14 +818,9 @@ class PreviewModal {
         // Ottieni la data di output dalla configurazione globale
         let dataInserimento = null;
         try {
-            const response = await fetch('/api/config/output-date', {
-                credentials: 'include'
-            });
-            if (response.ok) {
-                const data = await response.json();
-                if (data.success) {
-                    dataInserimento = data.output_date;
-                }
+            const data = await apiGet('/api/config/output-date');
+            if (data.success) {
+                dataInserimento = data.output_date;
             }
         } catch (error) {
             console.error('Errore lettura data output:', error);
@@ -880,17 +857,7 @@ class PreviewModal {
             saveBtn.disabled = true;
             saveBtn.textContent = '⏳ Salvataggio...';
 
-            const response = await fetch('/preview/save', {
-                method: 'POST',
-                body: formData,
-                credentials: 'include'
-            });
-
-            const result = await response.json();
-
-            if (!response.ok) {
-                throw new Error(result.detail || 'Errore durante il salvataggio');
-            }
+            const result = await apiPostForm('/preview/save', formData);
 
             // Mostra messaggio di successo nel modal
             this.showMessage('✅ DDT salvato con successo! Le correzioni sono state apprese dal sistema.', 'success');

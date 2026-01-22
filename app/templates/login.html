@@ -376,42 +376,27 @@
             formData.append('username', username);
             formData.append('password', password);
             
-            const response = await fetch('/login', {
-                method: 'POST',
-                body: formData,
-                credentials: 'include',
-                headers: {
-                    'Accept': 'application/json'
-                }
-            });
+            const data = await apiPostForm('/login', formData);
             
-            // Gestisci risposta JSON
-            const contentType = response.headers.get('content-type') || '';
-            
-            if (contentType.includes('application/json')) {
-                const data = await response.json();
+            if (data.success) {
+                // Successo - animazione e redirect
+                loginCard.classList.add('login-success');
+                btnText.textContent = 'Accesso riuscito';
                 
-                if (response.ok && data.success) {
-                    // Successo - animazione e redirect
-                    loginCard.classList.add('login-success');
-                    btnText.textContent = 'Accesso riuscito';
-                    
-                    // Usa il redirect dal server o default a dashboard
-                    const redirectUrl = data.redirect || '/dashboard';
-                    setTimeout(() => {
-                        window.location.href = redirectUrl;
-                    }, 500);
-                } else {
-                    // Errore
-                    showMessage(data.detail || 'Credenziali non valide', 'error');
-                    document.getElementById('password').value = '';
-                    document.getElementById('password').focus();
-                    submitBtn.disabled = false;
-                    submitBtn.classList.remove('loading');
-                    btnText.textContent = originalText;
-                }
+                // Usa il redirect dal server o default a dashboard
+                const redirectUrl = data.redirect || '/dashboard';
+                setTimeout(() => {
+                    window.location.href = redirectUrl;
+                }, 500);
             } else {
-                // Fallback: se non è JSON, prova a gestire come HTML redirect
+                // Errore
+                showMessage(data.detail || 'Credenziali non valide', 'error');
+                document.getElementById('password').value = '';
+                document.getElementById('password').focus();
+                submitBtn.disabled = false;
+                submitBtn.classList.remove('loading');
+                btnText.textContent = originalText;
+            }
                 if (response.ok || response.status === 302) {
                     // Login riuscito con redirect HTML
                     loginCard.classList.add('login-success');

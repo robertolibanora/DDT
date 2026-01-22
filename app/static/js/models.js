@@ -43,15 +43,7 @@ const ModelsPage = {
             container.classList.add('hidden');
             emptyState.classList.add('hidden');
             
-            const response = await fetch('/api/models', {
-                credentials: 'include'
-            });
-            
-            if (!response.ok) {
-                throw new Error(`Errore ${response.status}: ${response.statusText}`);
-            }
-            
-            const data = await response.json();
+            const data = await apiGet('/api/models');
             
             if (data.success) {
                 this.models = data.models || [];
@@ -287,14 +279,9 @@ const ModelsPage = {
         }
         
         try {
-            const response = await fetch(`/api/models/${encodeURIComponent(model.id)}`, {
-                method: 'DELETE',
-                credentials: 'include'
-            });
+            const data = await apiDelete(`/api/models/${encodeURIComponent(model.id)}`);
             
-            const data = await response.json();
-            
-            if (response.ok && data.success) {
+            if (data.success) {
                 this.showSuccess(`Modello "${model.name}" eliminato con successo`);
                 // Ricarica la lista
                 this.loadModels();
