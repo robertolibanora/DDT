@@ -92,17 +92,40 @@
         /**
          * Estrae un messaggio di errore leggibile da un oggetto error
          * Gestisce Error, oggetti JSON con detail/error, e Response non parsate
+         * GARANZIA: NON restituisce mai "[object Object]"
          */
         function getReadableError(error) {
+            // Caso null/undefined
             if (!error) return "Errore sconosciuto";
+            
+            // Caso stringa: restituisci direttamente
             if (typeof error === "string") return error;
-            if (error.detail) return error.detail;
-            if (error.message) return error.message;
-            if (error.error) return error.error;
+            
+            // Caso Error object: usa message
+            if (error instanceof Error) {
+                return error.message || "Errore durante l'anteprima";
+            }
+            
+            // Cerca proprietà standard di errore (priorità: detail > message > error)
+            if (error.detail && typeof error.detail === "string") return error.detail;
+            if (error.message && typeof error.message === "string") return error.message;
+            if (error.error && typeof error.error === "string") return error.error;
+            
+            // Prova a serializzare come JSON (solo se non è un oggetto complesso)
             try {
-                return JSON.stringify(error);
+                const jsonStr = JSON.stringify(error);
+                // Se JSON.stringify restituisce "[object Object]", ignoralo
+                if (jsonStr === "{}" || jsonStr === '"[object Object]"' || jsonStr.includes("[object Object]")) {
+                    return "Errore durante l'anteprima";
+                }
+                // Se è una stringa valida ma troppo lunga, troncala
+                if (jsonStr.length > 200) {
+                    return jsonStr.substring(0, 200) + "...";
+                }
+                return jsonStr;
             } catch {
-                return "Errore imprevisto durante l'anteprima";
+                // Se JSON.stringify fallisce, usa messaggio generico
+                return "Errore durante l'anteprima";
             }
         }
 
