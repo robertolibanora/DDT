@@ -743,6 +743,54 @@ def health():
     })
 
 
+@app.get("/api/health", include_in_schema=False)
+def api_health():
+    """
+    Endpoint health check API - alias di /health per compatibilità frontend/servizi.
+    Ritorno immediato (<100ms), MAI solleva eccezioni.
+    """
+    from datetime import datetime
+    import os
+    
+    checks = {
+        "config": False,
+        "processed_documents": False
+    }
+    
+    # Check global_config.json (lettura)
+    try:
+        from app.paths import get_app_dir
+        config_file = get_app_dir() / "global_config.json"
+        if config_file.exists() and os.access(config_file, os.R_OK):
+            checks["config"] = True
+    except Exception:
+        pass  # Ignora errori, checks["config"] rimane False
+    
+    # Check processed_documents.json (lettura)
+    try:
+        from app.paths import get_processed_documents_file
+        processed_file = get_processed_documents_file()
+        if processed_file.exists() and os.access(processed_file, os.R_OK):
+            checks["processed_documents"] = True
+    except Exception:
+        pass  # Ignora errori, checks["processed_documents"] rimane False
+    
+    # Determina status
+    all_ok = all(checks.values())
+    status = "ok" if all_ok else "degraded"
+    
+    # Log solo se degradato
+    if status != "ok":
+        logger.warning(f"[HEALTH] Status degraded (PID={os.getpid()}): checks={checks}")
+    
+    # MAI sollevare eccezioni, sempre HTTP 200
+    return JSONResponse({
+        "status": status,
+        "time": datetime.now().isoformat(),
+        "checks": checks
+    })
+
+
 @app.get("/ready", include_in_schema=False)
 async def ready():
     """
