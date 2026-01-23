@@ -362,10 +362,22 @@
                         
                         const pollInterval = setInterval(async () => {
                             pollAttempts++;
+                            console.log(`STEP QUEUED-POLL [${pollAttempts}/${maxPollAttempts}]: Controllo coda watchdog per hash ${fileHash?.substring(0, 16)}...`);
                             
                             try {
                                 const queueData = await apiGet('/api/watchdog-queue');
                                 const items = Array.isArray(queueData?.items) ? queueData.items : [];
+                                
+                                console.log(`STEP QUEUED-POLL [${pollAttempts}]: Trovati ${items.length} elementi nella coda`);
+                                
+                                // Log degli hash presenti nella coda per debug
+                                if (items.length > 0) {
+                                    console.log('STEP QUEUED-POLL: Hash nella coda:', items.map(item => ({
+                                        hash: item.file_hash?.substring(0, 16),
+                                        has_extracted_data: !!item.extracted_data,
+                                        file_name: item.file_name
+                                    })));
+                                }
                                 
                                 // Cerca il documento nella coda per hash
                                 const readyItem = items.find(item => item.file_hash === fileHash && item.extracted_data);
@@ -373,7 +385,12 @@
                                 if (readyItem && readyItem.extracted_data) {
                                     // Documento pronto! Mostra anteprima
                                     clearInterval(pollInterval);
-                                    console.log('STEP QUEUED-POLL: Documento pronto, mostro anteprima');
+                                    console.log('STEP QUEUED-POLL: ✅ Documento pronto, mostro anteprima', {
+                                        file_hash: readyItem.file_hash?.substring(0, 16),
+                                        file_name: readyItem.file_name,
+                                        has_extracted_data: !!readyItem.extracted_data,
+                                        has_pdf_base64: !!readyItem.pdf_base64
+                                    });
                                     
                                     await ensureModalReady();
                                     if (window.previewModal && typeof window.previewModal.show === 'function') {
@@ -388,16 +405,29 @@
                                             readyItem.ai_fallback_used || false,
                                             readyItem.ai_fallback_fields || []
                                         );
+                                        console.log('STEP QUEUED-POLL: ✅ Anteprima mostrata con successo');
+                                    } else {
+                                        console.error('STEP QUEUED-POLL: ❌ previewModal non disponibile');
                                     }
-                                } else if (pollAttempts >= maxPollAttempts) {
-                                    // Timeout: smetti di controllare
-                                    clearInterval(pollInterval);
-                                    console.log('STEP QUEUED-POLL: Timeout polling, documento non ancora pronto');
-                                    showMessage('⚠️ Il documento è ancora in elaborazione. Controlla la dashboard per vedere quando sarà pronto.', 'info');
+                                } else {
+                                    // Documento non ancora pronto
+                                    if (items.some(item => item.file_hash === fileHash)) {
+                                        const foundItem = items.find(item => item.file_hash === fileHash);
+                                        console.log(`STEP QUEUED-POLL [${pollAttempts}]: Documento trovato ma non ancora pronto (has_extracted_data: ${!!foundItem?.extracted_data})`);
+                                    } else {
+                                        console.log(`STEP QUEUED-POLL [${pollAttempts}]: Documento non ancora nella coda`);
+                                    }
+                                    
+                                    if (pollAttempts >= maxPollAttempts) {
+                                        // Timeout: smetti di controllare
+                                        clearInterval(pollInterval);
+                                        console.log('STEP QUEUED-POLL: ⏱️ Timeout polling, documento non ancora pronto');
+                                        showMessage('⚠️ Il documento è ancora in elaborazione. Controlla la dashboard per vedere quando sarà pronto.', 'info');
+                                    }
                                 }
                             } catch (pollError) {
                                 console.group('🔥 DIAGNOSI ERRORE POLLING');
-                                console.error('Errore durante polling coda watchdog:', pollError);
+                                console.error(`STEP QUEUED-POLL [${pollAttempts}]: Errore durante polling coda watchdog:`, pollError);
                                 console.log('typeof:', typeof pollError);
                                 console.log('instanceof Error:', pollError instanceof Error);
                                 console.log('constructor:', pollError?.constructor?.name);
@@ -407,6 +437,10 @@
                                 console.log('getReadableError:', getReadableError(pollError));
                                 console.groupEnd();
                                 // Continua a controllare nonostante l'errore (non mostrare errore all'utente durante polling)
+                                // Ma ferma il polling se abbiamo raggiunto il max
+                                if (pollAttempts >= maxPollAttempts) {
+                                    clearInterval(pollInterval);
+                                }
                             }
                         }, 5000); // Controlla ogni 5 secondi
                         
