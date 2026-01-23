@@ -229,6 +229,7 @@ async function apiPost(url, data = {}) {
 
 /**
  * Helper per chiamate POST FormData (per upload file)
+ * IMPORTANTE: Usa timeout più lungo (60 secondi) per upload file
  */
 async function apiPostForm(url, formData) {
     const response = await apiFetch(url, {
@@ -236,7 +237,7 @@ async function apiPostForm(url, formData) {
         body: formData,
         // Rimuovi Content-Type per permettere al browser di impostare il boundary
         headers: {}
-    });
+    }, 60000); // Timeout 60 secondi per upload file
     
     // Gestione 5xx come network error
     if (response.status >= 500 && response.status < 600) {
