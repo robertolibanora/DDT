@@ -1026,7 +1026,17 @@ async def upload_ddt(request: Request, file: UploadFile = File(...), auth: bool 
         inbox_saved_path = safe_copy(tmp_path_obj, inbox_saved_path)
         logger.info(f"📁 [WEB] File salvato in inbox: {inbox_saved_path.name}")
         
-        # 3. Registra come QUEUED (il worker lo processerà)
+        # 3. Pulisci elementi non processati dalla coda watchdog (rimuove file precedenti)
+        try:
+            from app.watchdog_queue import clear_pending_items
+            removed_count = clear_pending_items()
+            if removed_count > 0:
+                logger.info(f"🧹 [WEB] Rimossi {removed_count} elemento(i) precedente(i) dalla coda watchdog")
+        except Exception as e:
+            logger.warning(f"⚠️ [WEB] Errore pulizia coda watchdog: {e}", exc_info=True)
+            # Non bloccare l'upload se la pulizia fallisce
+        
+        # 4. Registra come QUEUED (il worker lo processerà)
         try:
             transition_document_state(
                 doc_hash=file_hash,
@@ -1043,7 +1053,7 @@ async def upload_ddt(request: Request, file: UploadFile = File(...), auth: bool 
             logger.error(f"❌ [WEB] Errore registrazione upload: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"Errore durante la registrazione: {str(e)}")
         
-        # 4. Restituisci risposta immediata (NON processare PDF qui)
+        # 5. Restituisci risposta immediata (NON processare PDF qui)
         return JSONResponse({
             "success": True,
             "file_hash": file_hash,
