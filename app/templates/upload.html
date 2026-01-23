@@ -396,8 +396,17 @@
                                     showMessage('⚠️ Il documento è ancora in elaborazione. Controlla la dashboard per vedere quando sarà pronto.', 'info');
                                 }
                             } catch (pollError) {
+                                console.group('🔥 DIAGNOSI ERRORE POLLING');
                                 console.error('Errore durante polling coda watchdog:', pollError);
-                                // Continua a controllare nonostante l'errore
+                                console.log('typeof:', typeof pollError);
+                                console.log('instanceof Error:', pollError instanceof Error);
+                                console.log('constructor:', pollError?.constructor?.name);
+                                console.log('raw error:', pollError);
+                                console.log('string:', String(pollError));
+                                console.log('keys:', Object.keys(pollError || {}));
+                                console.log('getReadableError:', getReadableError(pollError));
+                                console.groupEnd();
+                                // Continua a controllare nonostante l'errore (non mostrare errore all'utente durante polling)
                             }
                         }, 5000); // Controlla ogni 5 secondi
                         

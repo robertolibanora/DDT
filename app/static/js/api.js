@@ -128,7 +128,33 @@ async function apiGet(url, retryCount = 0) {
         }
         
         if (!response.ok) {
-            const error = new Error(`Errore ${response.status}: ${response.statusText}`);
+            let errorData = {};
+            try {
+                errorData = await response.json();
+            } catch (parseError) {
+                // Se il JSON non può essere parsato, usa statusText
+                errorData = {};
+            }
+            
+            // Estrai messaggio gestendo array di validazione FastAPI
+            let errorMessage = `Errore ${response.status}: ${response.statusText}`;
+            if (errorData.detail) {
+                if (Array.isArray(errorData.detail)) {
+                    const messages = errorData.detail.map(item => {
+                        const loc = Array.isArray(item.loc) ? item.loc.join('.') : '';
+                        const msg = item.msg || 'Errore di validazione';
+                        return loc ? `${loc}: ${msg}` : msg;
+                    });
+                    errorMessage = messages.join('; ') || errorMessage;
+                } else if (typeof errorData.detail === 'string') {
+                    errorMessage = errorData.detail;
+                }
+            } else if (errorData.error) {
+                errorMessage = typeof errorData.error === 'string' ? errorData.error : String(errorData.error);
+            }
+            
+            const error = new Error(errorMessage);
+            if (errorData.detail) error.detail = errorData.detail;
             // Anche 4xx possono essere considerati network error se il server è down
             if (response.status >= 502 && response.status < 600) {
                 error.isNetworkError = true;
