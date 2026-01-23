@@ -231,7 +231,9 @@
 
         function formatNumber(num) {
             const n = parseFloat(num);
-            return isNaN(n) ? '0.000' : n.toFixed(3);
+            if (isNaN(n)) return '0,000';
+            // Usa virgola come separatore decimale (formato italiano)
+            return n.toFixed(3).replace('.', ',');
         }
 
         /**

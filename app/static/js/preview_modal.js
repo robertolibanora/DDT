@@ -151,7 +151,11 @@ class PreviewModal {
 
                                 <div class="form-group form-group-highlight">
                                     <label for="preview-totale-kg">⚖️ Totale Kg</label>
-                                    <input type="number" id="preview-totale-kg" name="totale_kg" step="0.001" min="0" required>
+                                    <input type="text" id="preview-totale-kg" name="totale_kg" 
+                                           pattern="[0-9]+([,][0-9]{1,3})?" 
+                                           placeholder="0,000" 
+                                           inputmode="decimal"
+                                           required>
                                 </div>
 
                                 <div class="preview-form-actions">
@@ -409,7 +413,8 @@ class PreviewModal {
                     if (numeroEl) numeroEl.value = data.extracted_data.numero_documento || '';
                     if (kgEl) {
                         const kgValue = parseFloat(data.extracted_data.totale_kg) || 0;
-                        kgEl.value = kgValue.toFixed(3);
+                        // Usa virgola come separatore decimale (formato italiano)
+                        kgEl.value = kgValue.toFixed(3).replace('.', ',');
                     }
                     if (originalDataEl) {
                         originalDataEl.value = JSON.stringify(data.extracted_data);
@@ -638,7 +643,8 @@ class PreviewModal {
             if (numeroEl) numeroEl.value = extractedData.numero_documento || '';
             if (kgEl) {
                 const kgValue = parseFloat(extractedData.totale_kg) || 0;
-                kgEl.value = kgValue.toFixed(3);
+                // Usa virgola come separatore decimale (formato italiano)
+                kgEl.value = kgValue.toFixed(3).replace('.', ',');
             }
             
             // Disabilita i campi se non abbiamo dati estratti
@@ -845,7 +851,15 @@ class PreviewModal {
         formData.append('numero_documento', document.getElementById('preview-numero-documento').value);
         // Assicura che il peso abbia sempre 3 decimali
         const kgInput = document.getElementById('preview-totale-kg');
-        const kgValue = parseFloat(kgInput.value) || 0;
+        // Converte virgola in punto per il backend (il backend accetta entrambi)
+        const kgValueStr = (kgInput.value || '0').replace(',', '.').trim();
+        const kgValue = parseFloat(kgValueStr);
+        
+        // Validazione: deve essere un numero valido >= 0
+        if (isNaN(kgValue) || kgValue < 0) {
+            throw new Error('Il valore del peso totale deve essere un numero valido >= 0');
+        }
+        
         formData.append('totale_kg', kgValue.toFixed(3));
         
         // Aggiungi annotazioni se presenti
