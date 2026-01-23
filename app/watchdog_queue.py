@@ -255,6 +255,33 @@ def remove_item(queue_id: str):
         _save_queue()
 
 
+def clear_pending_items():
+    """
+    Rimuove tutti gli elementi non processati dalla coda watchdog.
+    
+    Usato quando viene caricato un nuovo file per evitare che elementi precedenti
+    interferiscano con il polling dell'anteprima.
+    
+    Returns:
+        Numero di elementi rimossi
+    """
+    global _watchdog_queue
+    
+    with _queue_lock:
+        _load_queue()
+        initial_count = len(_watchdog_queue)
+        
+        # Mantieni solo gli elementi già processati
+        _watchdog_queue = [item for item in _watchdog_queue if item.get("processed", False)]
+        
+        removed_count = initial_count - len(_watchdog_queue)
+        if removed_count > 0:
+            _save_queue()
+            logger.info(f"Pulizia coda watchdog: rimossi {removed_count} elementi non processati")
+        
+        return removed_count
+
+
 def get_item_by_id(queue_id: str) -> Optional[Dict[str, Any]]:
     """
     Ottiene un elemento specifico dalla coda
