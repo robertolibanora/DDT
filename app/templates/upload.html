@@ -345,7 +345,7 @@
                     // GUARDIA LOGICA: Se il documento è in stato QUEUED, NON mostrare anteprima
                     // L'anteprima sarà disponibile solo dopo il processing del WORKER
                     if (data.status === 'QUEUED') {
-                        console.log('STEP 5.1: RAMO QUEUED - uscita immediata');
+                        console.log('STEP 5.1: RAMO QUEUED - avvio polling per anteprima');
                         // Documento in coda per elaborazione
                         showMessage('✅ File caricato con successo. Il documento è in coda per l\'elaborazione. L\'anteprima sarà disponibile a breve.', 'success');
                         
@@ -354,8 +354,55 @@
                         fileInfo.classList.add('hidden');
                         dropzone.style.display = 'flex';
                         
-                        console.log('STEP 5.2: RETURN da ramo QUEUED');
-                        // Uscita immediata: NON chiamare previewModal.show() per QUEUED
+                        // Avvia polling per controllare quando il documento è pronto
+                        const fileHash = data.file_hash;
+                        const fileName = data.file_name;
+                        let pollAttempts = 0;
+                        const maxPollAttempts = 60; // 60 tentativi = 5 minuti (ogni 5 secondi)
+                        
+                        const pollInterval = setInterval(async () => {
+                            pollAttempts++;
+                            
+                            try {
+                                const queueData = await apiGet('/api/watchdog-queue');
+                                const items = Array.isArray(queueData?.items) ? queueData.items : [];
+                                
+                                // Cerca il documento nella coda per hash
+                                const readyItem = items.find(item => item.file_hash === fileHash && item.extracted_data);
+                                
+                                if (readyItem && readyItem.extracted_data) {
+                                    // Documento pronto! Mostra anteprima
+                                    clearInterval(pollInterval);
+                                    console.log('STEP QUEUED-POLL: Documento pronto, mostro anteprima');
+                                    
+                                    await ensureModalReady();
+                                    if (window.previewModal && typeof window.previewModal.show === 'function') {
+                                        window.previewModal.show(
+                                            readyItem.extracted_data,
+                                            readyItem.pdf_base64 || null,
+                                            readyItem.file_hash,
+                                            readyItem.file_name || fileName,
+                                            readyItem.extraction_mode || null,
+                                            readyItem.suggest_create_layout || false,
+                                            readyItem.has_layout_model !== undefined ? readyItem.has_layout_model : null,
+                                            readyItem.ai_fallback_used || false,
+                                            readyItem.ai_fallback_fields || []
+                                        );
+                                    }
+                                } else if (pollAttempts >= maxPollAttempts) {
+                                    // Timeout: smetti di controllare
+                                    clearInterval(pollInterval);
+                                    console.log('STEP QUEUED-POLL: Timeout polling, documento non ancora pronto');
+                                    showMessage('⚠️ Il documento è ancora in elaborazione. Controlla la dashboard per vedere quando sarà pronto.', 'info');
+                                }
+                            } catch (pollError) {
+                                console.error('Errore durante polling coda watchdog:', pollError);
+                                // Continua a controllare nonostante l'errore
+                            }
+                        }, 5000); // Controlla ogni 5 secondi
+                        
+                        console.log('STEP 5.2: RETURN da ramo QUEUED, polling avviato');
+                        // Uscita immediata: il polling gestirà l'apertura dell'anteprima
                         return;
                     }
                     
