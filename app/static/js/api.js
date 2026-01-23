@@ -171,7 +171,24 @@ async function apiPost(url, data = {}) {
     
     if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        const error = new Error(errorData.detail || `Errore ${response.status}: ${response.statusText}`);
+        
+        // Estrai messaggio gestendo array di validazione FastAPI
+        let errorMessage = `Errore ${response.status}: ${response.statusText}`;
+        if (errorData.detail) {
+            if (Array.isArray(errorData.detail)) {
+                const messages = errorData.detail.map(item => {
+                    const loc = Array.isArray(item.loc) ? item.loc.join('.') : '';
+                    const msg = item.msg || 'Errore di validazione';
+                    return loc ? `${loc}: ${msg}` : msg;
+                });
+                errorMessage = messages.join('; ') || errorMessage;
+            } else if (typeof errorData.detail === 'string') {
+                errorMessage = errorData.detail;
+            }
+        }
+        
+        const error = new Error(errorMessage);
+        if (errorData.detail) error.detail = errorData.detail;
         if (response.status >= 502 && response.status < 600) {
             error.isNetworkError = true;
         }
@@ -261,7 +278,24 @@ async function apiPut(url, data = {}) {
     
     if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        const error = new Error(errorData.detail || `Errore ${response.status}: ${response.statusText}`);
+        
+        // Estrai messaggio gestendo array di validazione FastAPI
+        let errorMessage = `Errore ${response.status}: ${response.statusText}`;
+        if (errorData.detail) {
+            if (Array.isArray(errorData.detail)) {
+                const messages = errorData.detail.map(item => {
+                    const loc = Array.isArray(item.loc) ? item.loc.join('.') : '';
+                    const msg = item.msg || 'Errore di validazione';
+                    return loc ? `${loc}: ${msg}` : msg;
+                });
+                errorMessage = messages.join('; ') || errorMessage;
+            } else if (typeof errorData.detail === 'string') {
+                errorMessage = errorData.detail;
+            }
+        }
+        
+        const error = new Error(errorMessage);
+        if (errorData.detail) error.detail = errorData.detail;
         if (response.status >= 502 && response.status < 600) {
             error.isNetworkError = true;
         }
@@ -281,7 +315,23 @@ async function apiDelete(url) {
     
     if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `Errore ${response.status}: ${response.statusText}`);
+        
+        // Estrai messaggio gestendo array di validazione FastAPI
+        let errorMessage = `Errore ${response.status}: ${response.statusText}`;
+        if (errorData.detail) {
+            if (Array.isArray(errorData.detail)) {
+                const messages = errorData.detail.map(item => {
+                    const loc = Array.isArray(item.loc) ? item.loc.join('.') : '';
+                    const msg = item.msg || 'Errore di validazione';
+                    return loc ? `${loc}: ${msg}` : msg;
+                });
+                errorMessage = messages.join('; ') || errorMessage;
+            } else if (typeof errorData.detail === 'string') {
+                errorMessage = errorData.detail;
+            }
+        }
+        
+        throw new Error(errorMessage);
     }
     
     return await response.json();

@@ -107,7 +107,20 @@
             }
             
             // Cerca proprietà standard di errore (priorità: detail > message > error)
-            if (error.detail && typeof error.detail === "string") return error.detail;
+            // IMPORTANTE: FastAPI può restituire detail come array di oggetti di validazione
+            if (error.detail) {
+                if (Array.isArray(error.detail)) {
+                    // Caso validazione FastAPI: detail è un array di oggetti
+                    const messages = error.detail.map(item => {
+                        const loc = Array.isArray(item.loc) ? item.loc.join('.') : '';
+                        const msg = item.msg || 'Errore di validazione';
+                        return loc ? `${loc}: ${msg}` : msg;
+                    });
+                    return messages.join('; ') || "Errore di validazione";
+                } else if (typeof error.detail === "string") {
+                    return error.detail;
+                }
+            }
             if (error.message && typeof error.message === "string") return error.message;
             if (error.error && typeof error.error === "string") return error.error;
             
