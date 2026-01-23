@@ -207,8 +207,29 @@ async function apiPostForm(url, formData) {
             // Se il JSON non può essere parsato, usa statusText
             errorData = {};
         }
+        
         // Estrai messaggio con priorità: detail > error > statusText
-        const errorMessage = errorData.detail || errorData.error || `Errore ${response.status}: ${response.statusText}`;
+        // IMPORTANTE: FastAPI può restituire detail come array di oggetti di validazione
+        let errorMessage = `Errore ${response.status}: ${response.statusText}`;
+        
+        if (errorData.detail) {
+            if (Array.isArray(errorData.detail)) {
+                // Caso validazione FastAPI: detail è un array di oggetti
+                // Estrai i messaggi da ogni oggetto di validazione
+                const messages = errorData.detail.map(item => {
+                    const loc = Array.isArray(item.loc) ? item.loc.join('.') : '';
+                    const msg = item.msg || 'Errore di validazione';
+                    return loc ? `${loc}: ${msg}` : msg;
+                });
+                errorMessage = messages.join('; ') || errorMessage;
+            } else if (typeof errorData.detail === 'string') {
+                // Caso normale: detail è una stringa
+                errorMessage = errorData.detail;
+            }
+        } else if (errorData.error) {
+            errorMessage = typeof errorData.error === 'string' ? errorData.error : String(errorData.error);
+        }
+        
         const error = new Error(errorMessage);
         // Copia eventuali proprietà aggiuntive dall'errore
         if (errorData.detail) error.detail = errorData.detail;
