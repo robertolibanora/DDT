@@ -24,13 +24,16 @@ async function apiFetch(url, options = {}, timeout = 5000) {
     const timeoutId = setTimeout(() => controller.abort(), timeout);
     
     // Assicura che credentials sia sempre 'include' per includere cookie di sessione
+    // IMPORTANTE: Se il body è FormData, NON impostare Content-Type (il browser lo fa automaticamente con boundary)
+    const isFormData = options.body instanceof FormData;
     const fetchOptions = {
         credentials: 'include',
         signal: controller.signal,
         ...options,
         // Merge headers se presenti
         headers: {
-            'Content-Type': 'application/json',
+            // NON impostare Content-Type se è FormData (il browser lo gestisce automaticamente)
+            ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
             ...options.headers
         }
     };
